@@ -5,7 +5,9 @@ OpenAI tool spec.
 import json
 import time
 import typing as t
+import warnings
 
+import typing_extensions as te
 from openai import Client
 from openai.types.beta.thread import Thread
 from openai.types.beta.threads.run import RequiredAction, Run
@@ -15,20 +17,28 @@ from openai.types.chat.chat_completion_message_tool_call import (
 )
 from openai.types.chat.chat_completion_tool_param import ChatCompletionToolParam
 
-from composio import Action, ActionType, AppType, TagType, WorkspaceConfigType
+from composio import ActionType, AppType, TagType
 from composio.constants import DEFAULT_ENTITY_ID
+from composio.exceptions import InvalidEntityIdError
 from composio.tools import ComposioToolSet as BaseComposioToolSet
 from composio.tools.schema import OpenAISchema, SchemaType
+from composio.tools.toolset import ProcessorsType
+from composio.utils import help_msg
 
 
-class ComposioToolSet(BaseComposioToolSet):
+class ComposioToolSet(
+    BaseComposioToolSet,
+    runtime="openai",
+    description_char_limit=1024,
+    action_name_char_limit=64,
+):
     """
     Composio toolset for OpenAI framework.
 
     Example:
     ```python
         import dotenv
-        from composio_openai import App, ComposioToolset
+        from composio_openai import App, ComposioToolSet
         from openai import OpenAI
 
 
@@ -37,7 +47,7 @@ class ComposioToolSet(BaseComposioToolSet):
 
         # Initialize tools.
         openai_client = OpenAI()
-        composio_tools = ComposioToolset()
+        composio_tools = ComposioToolSet()
 
         # Define task.
         task = "Star a repo composiohq/composio on GitHub"
@@ -62,33 +72,7 @@ class ComposioToolSet(BaseComposioToolSet):
     ```
     """
 
-    def __init__(
-        self,
-        api_key: t.Optional[str] = None,
-        base_url: t.Optional[str] = None,
-        entity_id: str = DEFAULT_ENTITY_ID,
-        output_in_file: bool = False,
-        workspace_config: t.Optional[WorkspaceConfigType] = None,
-        workspace_id: t.Optional[str] = None,
-    ) -> None:
-        """
-        Initialize composio toolset.
-
-        :param api_key: Composio API key
-        :param base_url: Base URL for the Composio API server
-        :param entity_id: Entity ID for making function calls
-        :param output_in_file: Whether to write output to a file
-        """
-        super().__init__(
-            api_key,
-            base_url,
-            runtime="openai",
-            entity_id=entity_id,
-            output_in_file=output_in_file,
-            workspace_config=workspace_config,
-            workspace_id=workspace_id,
-        )
-        self.schema = SchemaType.OPENAI
+    schema = SchemaType.OPENAI
 
     def validate_entity_id(self, entity_id: str) -> str:
         """Validate entity ID."""
@@ -97,14 +81,15 @@ class ComposioToolSet(BaseComposioToolSet):
             and entity_id != DEFAULT_ENTITY_ID
             and self.entity_id != entity_id
         ):
-            raise ValueError(
+            raise InvalidEntityIdError(
                 "separate `entity_id` can not be provided during "
-                "intialization and handelling tool calls"
+                "initialization and handelling tool calls"
             )
         if self.entity_id != DEFAULT_ENTITY_ID:
             entity_id = self.entity_id
         return entity_id
 
+    @te.deprecated("Use `ComposioToolSet.get_tools` instead.\n", category=None)
     def get_actions(
         self, actions: t.Sequence[ActionType]
     ) -> t.List[ChatCompletionToolParam]:
@@ -114,32 +99,34 @@ class ComposioToolSet(BaseComposioToolSet):
         :param actions: List of actions to wrap
         :return: Composio tools wrapped as `ChatCompletionToolParam` objects
         """
-        return [
-            ChatCompletionToolParam(  # type: ignore
-                **t.cast(
-                    OpenAISchema,
-                    self.schema.format(
-                        schema.model_dump(
-                            exclude_none=True,
-                        )
-                    ),
-                ).model_dump()
-            )
-            for schema in self.get_action_schemas(actions=actions)
-        ]
+        warnings.warn(
+            "Use `ComposioToolSet.get_tools` instead.\n" + help_msg(),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_tools(actions=actions)
 
     def get_tools(
         self,
-        apps: t.Sequence[AppType],
+        actions: t.Optional[t.Sequence[ActionType]] = None,
+        apps: t.Optional[t.Sequence[AppType]] = None,
         tags: t.Optional[t.List[TagType]] = None,
+        *,
+        processors: t.Optional[ProcessorsType] = None,
+        check_connected_accounts: bool = True,
     ) -> t.List[ChatCompletionToolParam]:
         """
         Get composio tools wrapped as OpenAI `ChatCompletionToolParam` objects.
 
+        :param actions: List of actions to wrap
         :param apps: List of apps to wrap
         :param tags: Filter the apps by given tags
+
         :return: Composio tools wrapped as `ChatCompletionToolParam` objects
         """
+        self.validate_tools(apps=apps, actions=actions, tags=tags)
+        if processors is not None:
+            self._processor_helpers.merge_processors(processors)
         return [
             ChatCompletionToolParam(  # type: ignore
                 **t.cast(
@@ -151,13 +138,46 @@ class ComposioToolSet(BaseComposioToolSet):
                     ),
                 ).model_dump()
             )
-            for schema in self.get_action_schemas(apps=apps, tags=tags)
+            for schema in self.get_action_schemas(
+                actions=actions,
+                apps=apps,
+                tags=tags,
+                check_connected_accounts=check_connected_accounts,
+                _populate_requested=True,
+            )
+        ]
+
+    def get_realtime_tools(
+        self,
+        actions: t.Optional[t.Sequence[ActionType]] = None,
+        apps: t.Optional[t.Sequence[AppType]] = None,
+        tags: t.Optional[t.List[TagType]] = None,
+    ) -> t.List[t.Dict]:
+        """
+        Get composio tools wrapped as OpenAI `ChatCompletionToolParam` objects.
+
+        :param actions: List of actions to wrap
+        :param apps: List of apps to wrap
+        :param tags: Filter the apps by given tags
+
+        :return: Composio tools wrapped as `ChatCompletionToolParam` objects
+        """
+        tools = self.get_tools(actions=actions, apps=apps, tags=tags)
+        return [
+            {
+                "type": "function",
+                "name": tool["function"]["name"],
+                "description": tool["function"].get("description", ""),
+                "parameters": tool["function"].get("parameters", {}),
+            }
+            for tool in tools
         ]
 
     def execute_tool_call(
         self,
         tool_call: ChatCompletionMessageToolCall,
         entity_id: t.Optional[str] = None,
+        check_requested_actions: bool = True,
     ) -> t.Dict:
         """
         Execute a tool call.
@@ -167,15 +187,17 @@ class ComposioToolSet(BaseComposioToolSet):
         :return: Object containing output data from the tool call.
         """
         return self.execute_action(
-            action=Action(value=tool_call.function.name),
+            action=tool_call.function.name,
             params=json.loads(tool_call.function.arguments),
             entity_id=entity_id or self.entity_id,
+            _check_requested_actions=check_requested_actions,
         )
 
     def handle_tool_calls(
         self,
         response: ChatCompletion,
         entity_id: t.Optional[str] = None,
+        check_requested_actions: bool = True,
     ) -> t.List[t.Dict]:
         """
         Handle tool calls from OpenAI chat completion object.
@@ -195,6 +217,7 @@ class ComposioToolSet(BaseComposioToolSet):
                             self.execute_tool_call(
                                 tool_call=tool_call,
                                 entity_id=entity_id or self.entity_id,
+                                check_requested_actions=check_requested_actions,
                             )
                         )
         return outputs
@@ -203,8 +226,9 @@ class ComposioToolSet(BaseComposioToolSet):
         self,
         run: Run,
         entity_id: t.Optional[str] = None,
+        check_requested_actions: bool = True,
     ) -> t.List:
-        """Wait and handle assisant function calls"""
+        """Wait and handle assistant function calls"""
         tool_outputs = []
         for tool_call in t.cast(
             RequiredAction, run.required_action
@@ -212,6 +236,7 @@ class ComposioToolSet(BaseComposioToolSet):
             tool_response = self.execute_tool_call(
                 tool_call=t.cast(ChatCompletionMessageToolCall, tool_call),
                 entity_id=entity_id or self.entity_id,
+                check_requested_actions=check_requested_actions,
             )
             tool_output = {
                 "tool_call_id": tool_call.id,
@@ -227,7 +252,7 @@ class ComposioToolSet(BaseComposioToolSet):
         thread: Thread,
         entity_id: t.Optional[str] = None,
     ) -> Run:
-        """Wait and handle assisant function calls"""
+        """Wait and handle assistant function calls"""
         thread_object = thread
         while run.status in ("queued", "in_progress", "requires_action"):
             if run.status == "requires_action":

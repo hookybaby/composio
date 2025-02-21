@@ -1,0 +1,17 @@
+{
+  "name": "newsletter-summarizer",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^3.60.3"
+  },
+  "dependencies": {
+    "composio-core": "latest",
+    "hono": "^4.6.16"
+  }
+}

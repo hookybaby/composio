@@ -1,15 +1,41 @@
 import typing as t
+import warnings
 
-from anthropic.types.beta.tools import ToolUseBlock, ToolsBetaMessage
-from anthropic.types.beta.tools.tool_param import ToolParam
+import typing_extensions as te
 
-from composio import Action, ActionType, AppType, TagType, WorkspaceConfigType
+from composio.exceptions import (
+    ErrorProcessingToolExecutionRequest,
+    InvalidEntityIdError,
+)
+from composio.utils import help_msg
+
+
+try:
+    from anthropic.types.beta.tools import ToolUseBlock, ToolsBetaMessage
+    from anthropic.types.beta.tools.tool_param import ToolParam
+
+    class BetaToolUseBlock:  # type: ignore
+        pass
+
+except ModuleNotFoundError:
+    from anthropic.types.tool_use_block import ToolUseBlock
+    from anthropic.types.tool_param import ToolParam
+    from anthropic.types.message import Message as ToolsBetaMessage
+    from anthropic.types.beta.beta_tool_use_block import BetaToolUseBlock  # type: ignore
+
+from composio import Action, ActionType, AppType, TagType
 from composio.constants import DEFAULT_ENTITY_ID
 from composio.tools import ComposioToolSet as BaseComposioToolSet
 from composio.tools.schema import ClaudeSchema, SchemaType
+from composio.tools.toolset import ProcessorsType
 
 
-class ComposioToolset(BaseComposioToolSet):
+class ComposioToolSet(
+    BaseComposioToolSet,
+    runtime="claude",
+    description_char_limit=1024,
+    action_name_char_limit=64,
+):
     """
     Composio toolset for Anthropic Claude platform.
 
@@ -17,7 +43,7 @@ class ComposioToolset(BaseComposioToolSet):
     ```python
         import anthropic
         import dotenv
-        from composio_claude import App, ComposioToolset
+        from composio_claude import App, ComposioToolSet
 
 
         # Load environment variables from .env
@@ -25,7 +51,7 @@ class ComposioToolset(BaseComposioToolSet):
 
         # Initialize tools.
         claude_client = anthropic.Anthropic()
-        composio_tools = ComposioToolset()
+        composio_tools = ComposioToolSet()
 
         # Define task.
         task = "Star a repo composiohq/composio on GitHub"
@@ -39,7 +65,7 @@ class ComposioToolset(BaseComposioToolSet):
             max_tokens=1024,
             tools=composio_tools,
             messages=[
-                {"role": "user", "content": "Star me sawradip/sawradip repo in github."},
+                {"role": "user", "content": "Star me composiohq/composio repo in github."},
             ],
         )
         print(response)
@@ -50,33 +76,7 @@ class ComposioToolset(BaseComposioToolSet):
     ```
     """
 
-    def __init__(
-        self,
-        api_key: t.Optional[str] = None,
-        base_url: t.Optional[str] = None,
-        entity_id: str = DEFAULT_ENTITY_ID,
-        output_in_file: bool = False,
-        workspace_config: t.Optional[WorkspaceConfigType] = None,
-        workspace_id: t.Optional[str] = None,
-    ) -> None:
-        """
-        Initialize composio toolset.
-
-        :param api_key: Composio API key
-        :param base_url: Base URL for the Composio API server
-        :param entity_id: Entity ID for making function calls
-        :param output_in_file: Whether to write output to a file
-        """
-        super().__init__(
-            api_key=api_key,
-            base_url=base_url,
-            runtime="claude",
-            entity_id=entity_id,
-            output_in_file=output_in_file,
-            workspace_config=workspace_config,
-            workspace_id=workspace_id,
-        )
-        self.schema = SchemaType.CLAUDE
+    schema = SchemaType.CLAUDE
 
     def validate_entity_id(self, entity_id: str) -> str:
         """Validate entity ID."""
@@ -85,14 +85,15 @@ class ComposioToolset(BaseComposioToolSet):
             and entity_id != DEFAULT_ENTITY_ID
             and self.entity_id != entity_id
         ):
-            raise ValueError(
+            raise InvalidEntityIdError(
                 "separate `entity_id` can not be provided during "
-                "intialization and handelling tool calls"
+                "initialization and handelling tool calls"
             )
         if self.entity_id != DEFAULT_ENTITY_ID:
             entity_id = self.entity_id
         return entity_id
 
+    @te.deprecated("Use `ComposioToolSet.get_tools` instead.\n", category=None)
     def get_actions(self, actions: t.Sequence[ActionType]) -> t.List[ToolParam]:
         """
         Get composio tools wrapped as `ToolParam` objects.
@@ -100,32 +101,34 @@ class ComposioToolset(BaseComposioToolSet):
         :param actions: List of actions to wrap
         :return: Composio tools wrapped as `ToolParam` objects
         """
-        return [
-            ToolParam(
-                **t.cast(
-                    ClaudeSchema,
-                    self.schema.format(
-                        schema.model_dump(
-                            exclude_none=True,
-                        )
-                    ),
-                ).model_dump()
-            )
-            for schema in self.get_action_schemas(actions=actions)
-        ]
+        warnings.warn(
+            "Use `ComposioToolSet.get_tools` instead.\n" + help_msg(),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_tools(actions=actions)
 
     def get_tools(
         self,
-        apps: t.Sequence[AppType],
+        actions: t.Optional[t.Sequence[ActionType]] = None,
+        apps: t.Optional[t.Sequence[AppType]] = None,
         tags: t.Optional[t.List[TagType]] = None,
-    ) -> t.Sequence[ToolParam]:
+        *,
+        processors: t.Optional[ProcessorsType] = None,
+        check_connected_accounts: bool = True,
+    ) -> t.List[ToolParam]:
         """
         Get composio tools wrapped as OpenAI `ChatCompletionToolParam` objects.
 
+        :param actions: List of actions to wrap
         :param apps: List of apps to wrap
         :param tags: Filter the apps by given tags
+
         :return: Composio tools wrapped as `ChatCompletionToolParam` objects
         """
+        self.validate_tools(apps=apps, actions=actions, tags=tags)
+        if processors is not None:
+            self._processor_helpers.merge_processors(processors)
         return [
             ToolParam(
                 **t.cast(
@@ -137,7 +140,13 @@ class ComposioToolset(BaseComposioToolSet):
                     ),
                 ).model_dump()
             )
-            for schema in self.get_action_schemas(apps=apps, tags=tags)
+            for schema in self.get_action_schemas(
+                actions=actions,
+                apps=apps,
+                tags=tags,
+                check_connected_accounts=check_connected_accounts,
+                _populate_requested=True,
+            )
         ]
 
     def execute_tool_call(
@@ -156,11 +165,12 @@ class ComposioToolset(BaseComposioToolSet):
             action=Action(value=tool_call.name),
             params=t.cast(t.Dict, tool_call.input),
             entity_id=entity_id or self.entity_id,
+            _check_requested_actions=True,
         )
 
     def handle_tool_calls(
         self,
-        llm_response: ToolsBetaMessage,
+        llm_response: t.Union[dict, ToolsBetaMessage],
         entity_id: t.Optional[str] = None,
     ) -> t.List[t.Dict]:
         """
@@ -171,10 +181,20 @@ class ComposioToolset(BaseComposioToolSet):
         :param entity_id: Entity ID to use for executing function calls.
         :return: A list of output objects from the function calls.
         """
-        entity_id = self.validate_entity_id(entity_id or self.entity_id)
+        # Since llm_response can also be a dictionary, we should only proceed
+        # towards action execution if we have the correct type of llm_response
+        if not isinstance(llm_response, (dict, ToolsBetaMessage)):
+            raise ErrorProcessingToolExecutionRequest(
+                "llm_response should be of type `Message` or castable to type `Message`, "
+                f"received object {llm_response} of type {type(llm_response)}"
+            )
+        if isinstance(llm_response, dict):
+            llm_response = ToolsBetaMessage(**llm_response)
+
         outputs = []
+        entity_id = self.validate_entity_id(entity_id or self.entity_id)
         for content in llm_response.content:
-            if isinstance(content, ToolUseBlock):
+            if isinstance(content, (ToolUseBlock, BetaToolUseBlock)):
                 outputs.append(
                     self.execute_tool_call(
                         tool_call=content,

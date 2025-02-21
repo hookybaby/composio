@@ -77,13 +77,17 @@ format-code:
 	tox -e isort
 	tox -e black
 
+.PHONY: fmt
+fmt: format-code
+	@echo
+
 .PHONY: check-code
 check-code:
-	tox -e isort-check
-	tox -e black-check
-	tox -e flake8
-	tox -e mypy
-	tox -e pylint
+	tox run-parallel -e isort-check,black-check,flake8,mypy,pylint --parallel-no-spinner
+
+.PHONY: chk
+chk: check-code
+	@echo
 
 .PHONY: format-and-check
 format-and-check:
@@ -92,7 +96,7 @@ format-and-check:
 
 .PHONY: env
 env: clean
-	if [[ "$$VIRTUAL_ENV" == "" ]];\
+	if [ -z "$$VIRTUAL_ENV"];\
 	then\
 		pipenv --rm;\
 		pipenv --clear;\

@@ -5,14 +5,22 @@ import time
 import typing as t
 import uuid
 
-import gql
-import gql.transport
 import requests
 import typing_extensions as te
-from gql.transport.requests import RequestsHTTPTransport
 
 from composio.tools.env.constants import DEFAULT_IMAGE
 from composio.utils.logging import WithLogger
+
+
+try:
+    import gql
+    import gql.transport
+    from gql.transport.requests import RequestsHTTPTransport
+
+    FLYIO_DEPENDENCIES_INSTALLED = True
+except ImportError:
+    RequestsHTTPTransport = t.Any
+    FLYIO_DEPENDENCIES_INSTALLED = False
 
 
 FLY_API = "https://api.machines.dev"
@@ -200,13 +208,12 @@ class FlyIO(WithLogger):
 
     def _wait_for_machine(self) -> None:
         """Wait for machine to get started."""
-        while True:
+        deadline = time.time() + float(os.environ.get("WORKSPACE_WAIT_TIMEOUT", 60.0))
+        while time.time() < deadline:
             try:
                 requests.get(
                     self.url,
-                    headers={
-                        "x-api-key": self.access_token,
-                    },
+                    headers={"x-api-key": self.access_token},
                     timeout=30.0,
                 ).content.decode()
                 return

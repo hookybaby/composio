@@ -1,7 +1,6 @@
 ---
 title: "🐫 Using Composio With CAMEL-AI"
-sidebarTitle: "CAMEL SDK"
-icon: "cow"
+sidebarTitle: "CAMEL"
 description: "Integrate Composio with CAMEL agents to let them seamlessly interact with external apps"
 ---
 
@@ -16,7 +15,7 @@ Ensure you have the necessary packages installed and connect your GitHub account
     ``` bash Run command
     pip install camel-ai
     pip install composio-camel -U
-    #  Connect your Github so agents can use it. 
+    #  Connect your GitHub so agents can use it. 
     composio add github
     #  Check all different apps which you can connect with
     composio apps
@@ -54,7 +53,7 @@ This step involves fetching and integrating GitHub tools provided by Composio, e
 <CodeGroup>
     ```python CAMEL Supported tools from Composio
     composio_toolset = ComposioToolSet()
-    tools = composio_toolset.get_actions(
+    tools = composio_toolset.get_tools(
         actions=[Action.GITHUB_ACTIVITY_STAR_REPO_FOR_AUTHENTICATED_USER]
     )
     ```
@@ -108,7 +107,7 @@ Execute the following code to execute the agent, ensuring that the intended task
 <CodeGroup>
     ```python CAMEL Agent Execution
     prompt = (
-        "I have created a new Github Repo,"
+        "I have created a new GitHub Repo,"
         "Please star my github repository: camel-ai/camel"
     )
     user_msg = BaseMessage.make_user_message(role_name="User", content=prompt)

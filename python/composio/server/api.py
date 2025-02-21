@@ -17,15 +17,18 @@ from hashlib import md5
 from pathlib import Path
 
 import typing_extensions as te
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from composio import Action, App
+from composio import Action, App, __version__
 from composio.cli.context import get_context
 from composio.client.collections import ActionModel, AppModel
 from composio.client.enums.base import get_runtime_actions
+from composio.tools.base.abs import action_registry
 from composio.tools.env.base import ENV_ACCESS_TOKEN
+from composio.tools.local import load_local_tools
+from composio.utils.logging import get as get_logger
 
 
 ResponseType = t.TypeVar("ResponseType")
@@ -77,26 +80,44 @@ class ExecuteActionRequest(BaseModel):
         ...,
         description="Parameters for executing the request.",
     )
-    metadata: t.Dict = Field(
+    metadata: t.Optional[t.Dict] = Field(
         None,
         description="Metadata for executing action.",
     )
-    entity_id: str = Field(
+    entity_id: t.Optional[str] = Field(
         None,
-        description="Entity ID assosiated with the account.",
+        description="Entity ID associated with the account.",
     )
-    connected_account_id: str = Field(
+    connected_account_id: t.Optional[str] = Field(
         None,
         description="Connection ID to use for executing the action.",
     )
 
 
+class ValidateToolsRequest(BaseModel):
+    apps: t.Optional[t.List[str]] = Field(
+        None,
+        description="Apps list.",
+    )
+    actions: t.Optional[t.List[str]] = Field(
+        None,
+        description="Actions list.",
+    )
+    tags: t.Optional[t.List[str]] = Field(
+        None,
+        description="Tags list.",
+    )
+
+
 def create_app() -> FastAPI:
     """Create Fast API app."""
+    load_local_tools()
+
     access_token = os.environ.get(ENV_ACCESS_TOKEN)
     tooldir = tempfile.TemporaryDirectory()
     app = FastAPI(on_shutdown=[tooldir.cleanup])
     sys.path.append(tooldir.name)
+    logger = get_logger()
 
     def with_exception_handling(f: t.Callable[P, R]) -> t.Callable[P, APIResponse[R]]:
         """Marks a callback as wanting to receive the current context object as first argument."""
@@ -105,6 +126,7 @@ def create_app() -> FastAPI:
             try:
                 return APIResponse[R](data=f(*args, **kwargs))
             except Exception as e:
+                logger.error(traceback.format_exc())
                 return APIResponse[R](
                     data=None,
                     error=str(e),
@@ -133,9 +155,7 @@ def create_app() -> FastAPI:
     @with_exception_handling
     def _api() -> GetApiResponse:
         """Composio tooling server API root."""
-        return GetApiResponse(
-            version="0.3.20",
-        )
+        return GetApiResponse(version=__version__)
 
     @app.get("/api/apps", response_model=APIResponse[t.List[AppModel]])
     @with_exception_handling
@@ -147,10 +167,15 @@ def create_app() -> FastAPI:
     @with_exception_handling
     def _update_apps() -> bool:
         """Get list of all available apps."""
-        from composio.cli.apps import update  # pylint: disable=import-outside-toplevel
+        from composio.client.utils import (  # pylint: disable=import-outside-toplevel
+            update_actions,
+            update_apps,
+            update_triggers,
+        )
 
-        update(context=get_context())
-
+        apps = update_apps(client=get_context().client)
+        update_actions(client=get_context().client, apps=apps)
+        update_triggers(client=get_context().client, apps=apps)
         return True
 
     @app.get("/api/apps/{name}", response_model=APIResponse[AppModel])
@@ -176,7 +201,7 @@ def create_app() -> FastAPI:
     def _get_local_actions() -> t.List[ActionModel]:
         """Get list of all available actions."""
         return get_context().toolset.get_action_schemas(
-            actions=[action.slug for action in Action.all() if action.is_local]
+            actions=list(action_registry["local"])
         )
 
     @app.get("/api/enums/actions", response_model=APIResponse[t.List[str]])
@@ -203,6 +228,16 @@ def create_app() -> FastAPI:
             connected_account_id=request.connected_account_id,
         )
 
+    @app.post(path="/api/validate", response_model=APIResponse[t.Dict])
+    @with_exception_handling
+    def _validate_tools(request: ValidateToolsRequest) -> t.Dict:
+        get_context().toolset.validate_tools(
+            apps=request.apps,
+            actions=request.actions,
+            tags=request.tags,
+        )
+        return {"message": "validated"}
+
     @app.get("/api/workspace", response_model=APIResponse[t.Dict])
     @with_exception_handling
     def _get_workspace_information() -> t.Dict:
@@ -219,15 +254,16 @@ def create_app() -> FastAPI:
     @with_exception_handling
     def _upload_workspace_tools(request: ToolUploadRequest) -> t.List[str]:
         """Get list of available developer tools."""
-        process = subprocess.run(
-            args=["pip", "install", *request.dependencies],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if process.returncode != 0:
-            raise RuntimeError(
-                f"Error installing dependencies: {process.stderr.decode()}"
+        if len(request.dependencies) > 0:
+            process = subprocess.run(
+                args=["pip", "install", *request.dependencies],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
+            if process.returncode != 0:
+                raise RuntimeError(
+                    f"Error installing dependencies: {process.stderr.decode()}"
+                )
 
         filename = md5(request.content.encode(encoding="utf-8")).hexdigest()
         tempfile = Path(tooldir.name, f"{filename}.py")
@@ -239,9 +275,13 @@ def create_app() -> FastAPI:
         return get_runtime_actions()
 
     @app.get("/api/download")
-    def _download_file_or_dir(request: Request):
+    def _download_file_or_dir(file: t.Optional[str] = None):
         """Get list of available developer tools."""
-        path = Path(request.query_params["file"])
+        if not file:
+            raise HTTPException(
+                status_code=400, detail="File path is required as query parameter"
+            )
+        path = Path(file)
         if not path.exists():
             return Response(
                 content=APIResponse[None](

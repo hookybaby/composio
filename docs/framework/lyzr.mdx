@@ -1,7 +1,6 @@
 ---
 title: "Using Composio With Lyzr"
-sidebarTitle: "Lyzr SDK"
-icon: "robot"
+sidebarTitle: "Lyzr"
 description: "Integrate Composio with Lyzr agents to let them seamlessly interact with external apps"
 ---
 
@@ -56,7 +55,7 @@ These commands prepare your environment for seamless interaction between Lyzr an
             prompt_persona="You are AI agent that is responsible for taking actions on Github on users behalf. You need to take action on Github using Github APIs",
         )
 
-        composio_toolset = ComposioToolSet().get_lyzr_tool(Action.GITHUB_ACTIVITY_STAR_REPO_FOR_AUTHENTICATED_USER)
+        composio_toolset = ComposioToolSet().get_lyzr_tool(Action.GITHUB_STAR_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER)
 
         task = Task(
             name="Github Starring",

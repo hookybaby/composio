@@ -8,12 +8,10 @@ from uuid import uuid4
 
 import requests
 
-from composio.client.enums import Action
+from composio.client.enums import Action, ActionType, AppType, TagType
 from composio.constants import ENV_COMPOSIO_API_KEY, ENV_COMPOSIO_BASE_URL
 from composio.exceptions import ComposioSDKError
-from composio.tools.env.filemanager import FileManager
 from composio.tools.env.id import generate_id
-from composio.tools.local.handler import get_runtime_action
 from composio.utils.logging import WithLogger
 
 
@@ -33,22 +31,18 @@ def _read_env_var(name: str, default: t.Any) -> str:
 
     value = os.environ.get(name, default)
     if value is None:
-        raise ValueError(f"Please provide value for `{name}`")
+        raise ComposioSDKError(f"Please provide value for `{name}`")
     return value
 
 
-class Shell(ABC, WithLogger):
-    """Abstract shell session."""
+class Sessionable(WithLogger, ABC):
+    """Sessionable abstraction"""
 
     _id: str
 
-    def sanitize_command(self, cmd: str) -> bytes:
-        """Prepare command string."""
-        return (cmd.rstrip() + "\n").encode()
-
     def __str__(self) -> str:
         """String representation."""
-        return f"Shell(type={self.__class__.__name__}, id={self.id})"
+        return f"Sessionable(type={self.__class__.__name__}, id={self.id})"
 
     __repr__ = __str__
 
@@ -59,137 +53,72 @@ class Shell(ABC, WithLogger):
 
     @abstractmethod
     def setup(self) -> None:
-        """Setup shell."""
+        """Setup session."""
 
     @abstractmethod
-    def exec(self, cmd: str) -> t.Dict:
-        """Execute command on container."""
-
-    @abstractmethod
-    def stop(self) -> None:
-        """Stop and remove the running shell."""
+    def teardown(self) -> None:
+        """Teardown session."""
 
 
-class ShellFactory(WithLogger):
-    """Shell factory."""
+SessionableType = t.TypeVar("SessionableType", bound=Sessionable)
 
-    _recent: t.Optional[Shell] = None
-    _shells: t.Dict[str, Shell] = {}
+
+class SessionFactory(WithLogger, t.Generic[SessionableType]):
+    """Factory abstraction."""
+
+    _session: t.Dict[str, SessionableType] = {}
+    _recent: t.Optional[SessionableType] = None
     _lock: threading.Lock = threading.Lock()
 
-    def __init__(self, factory: t.Callable[[], Shell]) -> None:
+    def __init__(self, factory: t.Callable[[], SessionableType]) -> None:
         """Creatte shell factory"""
         super().__init__()
         self._factory = factory
 
     @property
-    def recent(self) -> Shell:
+    def recent(self) -> SessionableType:
         """Get most recent workspace."""
         with self._lock:
-            shell = self._recent
-        if shell is None:
-            shell = self.new()
+            session = self._recent
+        if session is None:
+            session = self.new()
             with self._lock:
-                self._recent = shell
-        return shell
+                self._recent = session
+        return session
 
     @recent.setter
-    def recent(self, shell: Shell) -> None:
+    def recent(self, shell: SessionableType) -> None:
         """Get most recent workspace."""
         with self._lock:
             self._recent = shell
 
-    def new(self) -> Shell:
+    def new(self) -> SessionableType:
         """Create a new shell."""
-        shell = self._factory()
-        shell.setup()
-        self._shells[shell.id] = shell
-        self.recent = shell
-        return shell
+        session = self._factory()
+        session.setup()
+        self._session[session.id] = session
+        self.recent = session
+        return session
 
-    def get(self, id: t.Optional[str] = None) -> Shell:
+    def get(self, id: t.Optional[str] = None) -> SessionableType:
         """Get shell instance."""
         if id is None or id == "":
             return self.recent
-        if id not in self._shells:
+
+        if id not in self._session:
             raise ComposioSDKError(
-                message=f"No shell found with ID: {id}",
+                message=f"No session of type {self._factory.__name__} found with ID: {id}",
             )
-        shell = self._shells[id]
+        shell = self._session[id]
         self.recent = shell
         return shell
 
-    def exec(self, cmd: str, id: t.Optional[str] = None) -> t.Dict:
-        """Execute a command on shell."""
-        return self.get(id=id).exec(cmd=cmd)
-
-    def stop(self, id: str) -> None:
-        """Stop shell with given ID."""
-        if id not in self._shells:
-            return
-        shell = self._shells.pop(id)
-        shell.stop()
-
     def teardown(self) -> None:
         """Stop all running shells."""
-        while len(self._shells) > 0:
-            id, *_ = list(self._shells.keys())
-            self._shells.pop(id).stop()
-            self.logger.debug(f"Stopped shell with ID: {id}")
-        self._recent = None
-
-
-class FileManagerFactory(WithLogger):
-    """File manager factory."""
-
-    _recent: t.Optional[FileManager] = None
-    _file_managers: t.Dict[str, FileManager] = {}
-    _lock: threading.Lock = threading.Lock()
-
-    def __init__(self, factory: t.Callable[[], FileManager]) -> None:
-        """Create file manager factory"""
-        super().__init__()
-        self._factory = factory
-
-    @property
-    def recent(self) -> FileManager:
-        """Get most recent file manager."""
-        with self._lock:
-            file_manager = self._recent
-        if file_manager is None:
-            file_manager = self.new()
-            with self._lock:
-                self._recent = file_manager
-        return file_manager
-
-    @recent.setter
-    def recent(self, file_manager: FileManager) -> None:
-        """Set most recent file manager."""
-        with self._lock:
-            self._recent = file_manager
-
-    def new(self) -> FileManager:
-        """Create a new file manager."""
-        file_manager = self._factory()
-        self._file_managers[file_manager.id] = file_manager
-        self.recent = file_manager
-        return file_manager
-
-    def get(self, id: t.Optional[str] = None) -> FileManager:
-        """Get file manager instance."""
-        if id is None or id == "":
-            return self.recent
-        if id not in self._file_managers:
-            raise ComposioSDKError(
-                message=f"No file manager found with ID: {id}",
-            )
-        file_manager = self._file_managers[id]
-        self.recent = file_manager
-        return file_manager
-
-    def teardown(self) -> None:
-        """Clean up all file managers."""
-        self._file_managers.clear()
+        while len(self._session) > 0:
+            id = list(self._session.keys()).pop()
+            session = self._session.pop(id)
+            session.teardown()
         self._recent = None
 
 
@@ -225,35 +154,16 @@ class Workspace(WithLogger, ABC):
     ports: t.List[int]
     """List of available ports on the workspace, if empty all of the ports are available."""
 
-    _shell_factory: t.Optional[ShellFactory] = None
-
-    _file_manager_factory: t.Optional[FileManagerFactory] = None
-
     def __init__(self, config: WorkspaceConfigType):
         """Initialize workspace."""
         super().__init__()
         self.id = generate_id()
         self.access_token = uuid4().hex.replace("-", "")
-        self.composio_api_key = _read_env_var(
-            name=ENV_COMPOSIO_API_KEY,
-            default=config.composio_api_key,
-        )
-        self.composio_base_url = _read_env_var(
-            name=ENV_COMPOSIO_BASE_URL,
-            default=config.composio_base_url,
-        )
-        self.github_access_token = config.github_access_token or os.environ.get(
-            ENV_GITHUB_ACCESS_TOKEN, "NO_VALUE"
-        )
+        self.persistent = config.persistent
         self.environment = {
             **(config.environment or {}),
-            ENV_COMPOSIO_API_KEY: self.composio_api_key,
-            ENV_COMPOSIO_BASE_URL: self.composio_base_url,
-            ENV_GITHUB_ACCESS_TOKEN: self.github_access_token,
-            f"_COMPOSIO_{ENV_GITHUB_ACCESS_TOKEN}": self.github_access_token,
             ENV_ACCESS_TOKEN: self.access_token,
         }
-        self.persistent = config.persistent
 
     def __str__(self) -> str:
         """String representation."""
@@ -266,34 +176,17 @@ class Workspace(WithLogger, ABC):
         return WORKSPACE_PROMPT.format(ports=self.ports, host=self.host)
 
     @abstractmethod
+    def check_for_missing_dependencies(
+        self,
+        apps: t.Optional[t.Sequence[AppType]] = None,
+        actions: t.Optional[t.Sequence[ActionType]] = None,
+        tags: t.Optional[t.Sequence[TagType]] = None,
+    ) -> None:
+        """Install dependecies in the given workspace."""
+
+    @abstractmethod
     def setup(self) -> None:
         """Setup workspace."""
-
-    @property
-    def file_managers(self) -> FileManagerFactory:
-        """Returns file manager for current workspace."""
-        if self._file_manager_factory is None:
-            self._file_manager_factory = FileManagerFactory(
-                factory=self._create_file_manager,
-            )
-        return self._file_manager_factory
-
-    @property
-    def shells(self) -> ShellFactory:
-        """Returns shell factory for current workspace."""
-        if self._shell_factory is None:
-            self._shell_factory = ShellFactory(
-                factory=self._create_shell,
-            )
-        return self._shell_factory
-
-    @abstractmethod
-    def _create_shell(self) -> Shell:
-        """Create shell."""
-
-    @abstractmethod
-    def _create_file_manager(self) -> FileManager:
-        """Create file manager for the workspace."""
 
     @abstractmethod
     def execute_action(
@@ -304,13 +197,38 @@ class Workspace(WithLogger, ABC):
     ) -> t.Dict:
         """Execute an action in this workspace."""
 
+    @abstractmethod
     def teardown(self) -> None:
         """Teardown current workspace."""
-        self.shells.teardown()
 
 
 class RemoteWorkspace(Workspace):
     """Remote workspace client."""
+
+    def __init__(self, config: WorkspaceConfigType):
+        super().__init__(config)
+        self.composio_api_key = _read_env_var(
+            name=ENV_COMPOSIO_API_KEY,
+            default=config.composio_api_key,
+        )
+        self.composio_base_url = _read_env_var(
+            name=ENV_COMPOSIO_BASE_URL,
+            default=config.composio_base_url,
+        )
+        self.github_access_token = (
+            config.github_access_token
+            if config.github_access_token is not None
+            else os.environ.get(ENV_GITHUB_ACCESS_TOKEN, "NO_VALUE")
+        )
+        self.environment.update(
+            {
+                ENV_COMPOSIO_API_KEY: self.composio_api_key,
+                ENV_COMPOSIO_BASE_URL: self.composio_base_url,
+                ENV_GITHUB_ACCESS_TOKEN: self.github_access_token,
+                f"_COMPOSIO_{ENV_GITHUB_ACCESS_TOKEN}": self.github_access_token,
+                ENV_ACCESS_TOKEN: self.access_token,
+            }
+        )
 
     def _request(
         self,
@@ -318,9 +236,10 @@ class RemoteWorkspace(Workspace):
         method: str,
         json: t.Optional[t.Dict] = None,
         timeout: t.Optional[float] = 300.0,
+        log: bool = True,
     ) -> requests.Response:
         """Make request to the tooling server."""
-        return requests.request(
+        response = requests.request(
             url=f"{self.url}{endpoint}",
             method=method,
             json=json,
@@ -329,37 +248,78 @@ class RemoteWorkspace(Workspace):
             },
             timeout=timeout,
         )
-
-    def _create_shell(self) -> Shell:
-        raise NotImplementedError(
-            "Creating shells for remote workspaces is not allowed."
-        )
-
-    def _create_file_manager(self) -> FileManager:
-        raise NotImplementedError(
-            "Creating file manager for remote workspaces is not allowed."
-        )
+        if log:
+            self.logger.debug(
+                f"Making HTTP request on {self.id}\n"
+                f"Request: {method.upper()} {endpoint} @ {self.url}\n"
+                f"Response: {response.status_code} -> {response.text}"
+            )
+        if response.status_code in (500, 503):
+            raise ComposioSDKError(
+                message=(
+                    f"Error requesting data from {self}, "
+                    f"Request: {method.upper()} {endpoint} @ {self.url}\n"
+                    f"Response: {response.status_code} -> {response.text}"
+                ),
+            )
+        return response
 
     def _upload(self, action: Action) -> None:
         """Upload action instance to tooling server."""
-        obj = get_runtime_action(name=action.name)
+        from composio.tools.base.abs import (  # pylint: disable=import-outside-toplevel
+            tool_registry,
+        )
+
+        obj = tool_registry["runtime"][action.app].get(action)
         request = self._request(
             method="post",
             endpoint="/tools",
             json={
-                "content": Path(str(obj.module)).read_text(encoding="utf-8"),
-                "filename": Path(str(obj.module)).name,
-                "dependencies": obj.requires or {},
+                "content": Path(obj.file).read_text(encoding="utf-8"),
+                "filename": Path(obj.file).name,
+                "dependencies": obj.requires or [],
             },
         )
+        if request.status_code != 200:
+            raise ComposioSDKError(
+                message=f"Error uploading {action.slug}: {request.status_code=} {request.text}"
+            )
+
         response = request.json()
         if response["error"] is not None:
-            self.logger.error(
+            raise ComposioSDKError(
                 f"Error while uploading {action.slug}: " + response["error"]
             )
-        else:
-            self.logger.debug(
-                f"Succesfully uploaded: {action.slug}",
+
+        self.logger.debug(
+            f"Successfully uploaded: {action.slug} - {response}",
+        )
+
+    def check_for_missing_dependencies(
+        self,
+        apps: t.Optional[t.Sequence[AppType]] = None,
+        actions: t.Optional[t.Sequence[ActionType]] = None,
+        tags: t.Optional[t.Sequence[TagType]] = None,
+    ) -> None:
+        request = self._request(
+            endpoint="/validate",
+            method="post",
+            json={
+                "apps": list(map(str, apps or [])),
+                "actions": list(
+                    map(str, filter(lambda x: not hasattr(x, "enum"), actions or []))
+                ),
+                "tags": list(map(str, tags or [])),
+            },
+            timeout=600,
+        )
+        if request.status_code != 200:
+            raise ComposioSDKError(f"Error installing dependencies: {request.text}")
+
+        response = request.json()
+        if response["error"] is not None:
+            raise ComposioSDKError(
+                f"Error installing dependencies: {response['error']}"
             )
 
     def execute_action(
@@ -372,6 +332,7 @@ class RemoteWorkspace(Workspace):
         if action.is_runtime:
             self._upload(action=action)
 
+        _ = metadata.pop("_toolset", None)
         request = self._request(
             method="post",
             endpoint=f"/actions/execute/{action.slug}",
@@ -380,6 +341,11 @@ class RemoteWorkspace(Workspace):
                 "metadata": metadata,
             },
         )
+        if request.status_code != 200:
+            raise ComposioSDKError(
+                message=f"Error executing {action.slug}: {request.status_code=} {request.text}"
+            )
+
         response = request.json()
         if response["error"] is None:
             return response["data"]

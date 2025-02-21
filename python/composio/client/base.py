@@ -7,10 +7,12 @@ import typing as t
 import requests
 
 from composio.client.endpoints import Endpoint
-from composio.client.exceptions import HTTPError, NoItemsFound
-from composio.client.http import HttpClient
+from composio.client.exceptions import HTTPError
 from composio.utils import logging
 
+
+if t.TYPE_CHECKING:
+    from composio.client import Composio
 
 ModelType = t.TypeVar("ModelType")
 CollectionType = t.TypeVar("CollectionType", list, dict)
@@ -24,8 +26,8 @@ class Collection(t.Generic[ModelType], logging.WithLogger):
 
     _list_key: str = "items"
 
-    def __init__(self, client: "BaseClient") -> None:
-        """Initialize conntected accounts models namespace."""
+    def __init__(self, client: "Composio") -> None:
+        """Initialize connected accounts models namespace."""
         logging.WithLogger.__init__(self)
         self.client = client
 
@@ -49,12 +51,6 @@ class Collection(t.Generic[ModelType], logging.WithLogger):
             )
         return response
 
-    def _raise_if_empty(self, collection: CollectionType) -> CollectionType:
-        """Raise if provided colleciton is empty."""
-        if len(collection) > 0:
-            return collection
-        raise NoItemsFound(message="No items found")
-
     def get(self, queries: t.Optional[t.Dict[str, str]] = None) -> t.List[ModelType]:
         """List available models."""
         request = self._raise_if_required(
@@ -74,11 +70,3 @@ class Collection(t.Generic[ModelType], logging.WithLogger):
             message=f"Received invalid data object: {request.content.decode()}",
             status_code=request.status_code,
         )
-
-
-class BaseClient:
-    """Composio client abstraction."""
-
-    http: HttpClient
-    local: t.Any
-    api_key: str

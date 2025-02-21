@@ -5,7 +5,7 @@ CrewAI demo.
 import os
 
 import dotenv
-from crewai import Agent, Task
+from crewai import Agent, Crew, Task
 from langchain_openai import ChatOpenAI
 
 from composio_crewai import App, ComposioToolSet
@@ -36,10 +36,15 @@ crewai_agent = Agent(
 
 # Define task
 task = Task(
-    description="Star a repo composiohq/composio on GitHub",
+    description=(
+        "Star a repo composiohq/composio on GitHub, if the action is successful "
+        "include Action executed successfully"
+    ),
     agent=crewai_agent,
     expected_output="if the star happened",
 )
 
-# Execute task
-task.execute()
+my_crew = Crew(agents=[crewai_agent], tasks=[task])
+
+result = my_crew.kickoff()
+print(result)

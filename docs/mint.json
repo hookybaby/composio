@@ -12,7 +12,7 @@
   "colors": {
     "primary": "#343434",
     "light": "#fff",
-    "dark": "#9a4dff",
+    "dark": "#343434",
     "ultraLight": "#9a4dff",
     "ultraDark": "#9a4dff",
     "background": {
@@ -28,12 +28,12 @@
     "isHidden": false
   },
   "feedback": {
-    "suggestEdit": false,
+    "suggestEdit": true,
     "raiseIssue": true,
     "thumbsRating": true
   },
   "search": {
-    "prompt": "Make my agents useful _/\\_ ..."
+    "prompt": "Make my agents useful ..."
   },
   "metadata": {
     "og:image": "https://framerusercontent.com/images/YwaNXXQETYRs9LymxFCnTjp83Q.svg",
@@ -48,8 +48,8 @@
     }
   ],
   "topbarCtaButton": {
-    "name": "Dashboard",
-    "url": "https://app.composio.dev"
+    "name": "Get your API Key",
+    "url": "https://app.composio.dev/developers"
   },
   "topAnchor": {
     "name": "Documentation",
@@ -60,210 +60,285 @@
   },
   "tabs": [
     {
-      "name": "Guides",
-      "url": "patterns"
-    },
-    {
       "name": "Examples",
-      "url": "guides"
+      "url": "examples"
     },
     {
       "name": "API",
       "url": "api-reference"
+    },
+    {
+      "name": "All Tools",
+      "url": "https://app.composio.dev/apps"
+    },
+    {
+      "name": "Chat with Code",
+      "url": "https://entelligence.ai/ComposioHQ&composio"
     }
-  ],
-  "anchors": [
   ],
   "navigation": [
     {
       "group": "Introduction",
       "pages": [
         "introduction/intro/overview",
-        "introduction/intro/quickstart",
+        "introduction/intro/basic",
+        "introduction/intro/quickstart-tools",
+        "introduction/intro/quickstart-triggers"
+      ]
+    },
+    {
+      "group": "Tools",
+      "pages": [
+            "patterns/tools/what-are-tools",
+            {
+              "group": "Use Tools",
+              "pages": [
+                "patterns/tools/use-tools/action-guide-with-agents",
+                "patterns/tools/use-tools/use-specific-actions",
+                "patterns/tools/use-tools/get-action-inputs",
+                "patterns/tools/use-tools/processing-actions",
+                "patterns/tools/use-tools/configure-tools",
+                "patterns/tools/use-tools/action-guide-without-agents",
+                "patterns/tools/use-tools/use-tools-with-your-auth"
+              ]
+            },
+            {
+              "group": "Build Tools",
+              "pages": [
+                "patterns/tools/build-tools/custom-action-without-auth",
+                "patterns/tools/build-tools/custom-action-with-auth"
+              ]
+            },
+            "patterns/tools/custom-integration",
+            "patterns/tools/serve-tools",
+            "patterns/tools/versioning"
+      ]
+    },
+    {
+      "group": "Authentication",
+      "pages": [
+        "patterns/Auth/connected_account",
+        "patterns/Auth/using-connections",
+        "patterns/Auth/Integrations",
+        "patterns/Auth/examples/gmail_example",
+        "patterns/Auth/examples/shopify_example"
+      ]
+    },
+    {
+      "group": "Triggers & Webhooks",
+      "pages": [
+        "patterns/triggers/triggers",
+        "patterns/triggers/webhooks"
+      ]
+    },
+    {
+      "group": "Supported Frameworks",
+      "pages": [
+        "framework/autogen",
+        "framework/crewai",
+        "framework/gemini",
+        "framework/langchain",
+        "framework/langflow",
+        "framework/langgraph",
+        "framework/letta",
+        "framework/litellm",
+        "framework/llamaindex",
+        "framework/openai",
         {
-          "group": "Core Concepts",
+          "group": "Other Frameworks",
           "pages": [
-             "introduction/foundations/howtos/get_api_key",
-            "introduction/foundations/basic",
-            "introduction/foundations/components/integrations/integration-guide",
-            "introduction/foundations/components/entity/entity-guide",
-            "introduction/foundations/components/integrations/connected-account",
-            "introduction/foundations/components/actions/action-guide",
-            "introduction/foundations/components/triggers/trigger-guide",
-            "introduction/foundations/components/actions/local-code",
-            "introduction/foundations/components/integrations/custom-integration"
+            "framework/smolagents",
+            "framework/camelai",
+            "javascript/cloudflare",
+            "framework/griptape",
+            "framework/groq",
+            "framework/julep",
+            "framework/lyzr",
+            "framework/agno",
+            "framework/praisonai",
+            "javascript/vercel",
+            "framework/google",
+            "framework/ibm"
           ]
         }
       ]
     },
     {
-      "group": "Python",
+      "group": "Kits",
       "pages": [
         {
-          "group": "With Frameworks",
-          "icon": "code",
-          "iconType": "solid",
+          "group": "SWE kit",
           "pages": [
-      "framework/langchain",
-        "framework/autogen",
-        "framework/crewai",
-        "framework/lyzr",
-        "framework/openai",
-        "framework/julep",
-        "framework/griptape",
-        "framework/llamaindex",
-        "framework/camelai",
-        "framework/praisonai",
-        "framework/langgraph"
-          ]
-        },
-
-            {
-      "group": "More",
-      "icon": "circle",
-      "pages": [
-        "python/introduction",
-        "python/configuration",
-        "python/actions",
-        "python/trigger",
-        "python/local_tools"
-      ]
-    }
-      ]
-    },
-            {
-      "group": "Javascript",
-      "pages": [
-       "javascript/openai",
-        {
-          "group": "With frameworks",
-          "icon": "code",
-          "iconType": "solid",
-          "pages": [
-        "javascript/langchain",
-        "javascript/cloudflare"
+            "swekit-tools/introduction",
+            "swekit/introduction",
+            "swekit-js/introduction",
+            "swekit/benchmarks",
+            "swekit-examples/introduction"
           ]
         },
         {
-      "group": "More",
-      "icon": "circle",
-      "pages": [
-        "javascript/trigger"
-      ]
-    }
+          "group":"AI SDR Kit",
+          "pages": [
+            "sdrkit/tools",
+            "sdrkit/ai-lead-generator",
+            "sdrkit/ai-outreach-agent",
+            "sdrkit/ai-market-research-agent",
+            "sdrkit/ai-scheduling-agent"  
+          ]
+        },
+        {
+          "group": "Crypto Kit",
+          "pages": [
+            "cryptokit/tools",
+            "cryptokit/community_reward_agent",
+            "cryptokit/github_contributor_reward_agent",
+            "cryptokit/coinbase_agent",
+            "cryptokit/trading_agent"
+          ]
+        }
       ]
     },
     {
-      "group": "SweKit",
+      "group": "Others",
       "pages": [
-        "swekit/introduction",
-        "swekit/workspace-env",
-        "swekit/benchmarks"
+        "introduction/foundations/components/workspace",
+        "integrations/google",
+        "faq/api_key/api_key",
+        "faq/api_key/cli",
+        "faq/integrations_and_connections/list_of_tools",
+        "faq/supported_llms/supported_llm",
+        "monitoring-docs",
+        "changelog"
       ]
-    },
-    {
-      "group": "CLI",
-      "pages": [
-        "sdk/cli/install",
-        "sdk/cli/account",
-        "sdk/cli/trigger",
-        "sdk/cli/actions"
-      ]
-    },
-     {
-      "group": "Guides",
-      "pages": [
-      {
-        "group": "Patterns",
-        "pages": [
-          "patterns/functions/multiple-users",
-          "patterns/functions/triggers"
-        ]
-      },
-      {
-        "group": "How Tos",
-        "pages": [
-          "patterns/howtos/usecase",
-          "patterns/howtos/tool-finding",
-          "patterns/howtos/listing-connections"
-        ] 
-      },
-      {
-        "group": "Going to Production",
-        "pages": [
-          "patterns/production-guide/prod"
-        ]
-      }
-    ]
     },
     {
       "group": "Examples",
       "pages": [
-        "guides/examples/Example",
-    {
-          "group": "Python Guides", 
-          "pages":[
-            "guides/python/investment-analyst",
-            "guides/python/research-assistant",
-            "guides/python/sql-agent",
-            "guides/python/competitor-researcher",
-            "guides/python/rag_agent",
-            "guides/python/interpreter_agent",
-            "guides/python/news-summary",
-            "guides/python/calendar-agent"
-        ]
-      },
-      {
-        "group":"Javascript Guides",
-        "pages":[
-          "guides/javascript/calendar-agent",
-          "guides/javascript/code-execution-agent",
-          "guides/javascript/rag_agent",
-          "guides/javascript/investment-analyst"
-        ]
-      }
-        ]
+        {
+          "group": "Python Examples",
+          "pages": [
+            "examples/combined/rag-agent-python",
+            "examples/combined/code-execution-agent-python",
+            "examples/combined/calendar-agent-python",
+            "examples/combined/newsletter-summarizer-python",
+            "examples/combined/research-agent-python",
+            "examples/combined/sql-agent-python"
+          ]
+        },
+        {
+          "group": "JavaScript Examples",
+          "pages": [
+            "examples/combined/rag-agent-javascript",
+            "examples/combined/code-execution-agent-javascript",
+            "examples/combined/calendar-agent-javascript",
+            "examples/combined/newsletter-summarizer-javascript",
+            "examples/combined/research-agent-javascript",
+            "examples/combined/sql-agent-javascript"
+          ]
+        }
+      ]
     },
     {
       "group": "Endpoints",
       "icon": "robot",
       "pages": [
-        {
-          "icon": "code",
-          "group": "apps",
-          "pages": [
-            "api-reference/apps/list-all-apps"
-          ]
-        },
-        {
-          "icon": "rectangles-mixed",
-          "group": "connections",
-          "pages": [
-            "api-reference/connectedaccounts/list-all-connected-accounts",
-            "api-reference/connectedaccounts/connect-an-account",
-            "api-reference/connectedaccounts/get-a-connected-account",
-            "api-reference/connectedaccounts/delete-a-connected-account"
-          ]
-        },
-        {
-          "icon": "database",
-          "group": "integrations",
-          "pages": [
-            "api-reference/integrations/get-an-integration",
-            "api-reference/integrations/update-an-integration",
-            "api-reference/integrations/list-all-integrations",
-            "api-reference/integrations/create-a-new-integration"
-          ]
-        },
-        {
-          "group": "actions",
-          "pages": [
-            "api-reference/actions/get-a-specific-action",
-            "api-reference/actions/get-list-of-actions",
-            "api-reference/actions/execute-action"
-          ]
-        }
-      ]
+  {
+    "group": "Actions",
+    "pages": [
+      "api-reference/actions/list-action-tags",
+      "api-reference/actions/list-actions",
+      "api-reference/actions/get-action-inputs",
+      "api-reference/actions/get-single-action",
+      "api-reference/actions/execute-an-action"
+    ]
+  },
+  {
+    "group": "Api Keys",
+    "pages": [
+      "api-reference/api-keys/list-api-keys",
+      "api-reference/api-keys/generate-api-key",
+      "api-reference/api-keys/delete-api-key"
+    ]
+  },
+  {
+    "group": "Apps",
+    "pages": [
+      "api-reference/apps/list-app-categories",
+      "api-reference/apps/list-apps",
+      "api-reference/apps/get-single-app"
+    ]
+  },
+  {
+    "group": "Client",
+    "pages": [
+      "api-reference/client/get-user-info"
+    ]
+  },
+  {
+    "group": "Connections",
+    "pages": [
+      "api-reference/connections/list-connections",
+      "api-reference/connections/get-auth-credentials",
+      "api-reference/connections/get-single-connection",
+      "api-reference/connections/update-connection-data",
+      "api-reference/connections/delete-connection",
+      "api-reference/connections/disable-connection",
+      "api-reference/connections/enable-connection",
+      "api-reference/connections/initiate-connection"
+    ]
+  },
+  {
+    "group": "Integrations",
+    "pages": [
+      "api-reference/integrations/list-all-connectors",
+      "api-reference/integrations/get-connector-info",
+      "api-reference/integrations/create-connector",
+      "api-reference/integrations/delete-connector",
+      "api-reference/integrations/modify-connector"
+    ]
+  },
+  {
+    "group": "Logs",
+    "pages": [
+      "api-reference/logs/get-logs",
+      "api-reference/logs/post-logs"
+    ]
+  },
+  {
+    "group": "Projects",
+    "pages": [
+      "api-reference/projects/list-all-projects",
+      "api-reference/projects/get-project",
+      "api-reference/projects/regenerate-project-api-key",
+      "api-reference/projects/create-new-project",
+      "api-reference/projects/delete-project",
+      "api-reference/projects/rename-project"
+    ]
+  },
+  {
+    "group": "Team",
+    "pages": [
+      "api-reference/team/list-members",
+      "api-reference/team/invite-member"
+    ]
+  },
+  {
+    "group": "Triggers",
+    "pages": [
+      "api-reference/triggers/list-triggers",
+      "api-reference/triggers/get-active-triggers",
+      "api-reference/triggers/get-logs",
+      "api-reference/triggers/get-trigger-info",
+      "api-reference/triggers/get-webhook-url",
+      "api-reference/triggers/update-new-webhook",
+      "api-reference/triggers/delete-trigger",
+      "api-reference/triggers/disable-trigger",
+      "api-reference/triggers/enable-trigger",
+      "api-reference/triggers/set-callback-url",
+      "api-reference/triggers/switch-trigger-instance-status"
+    ]
+  }
+]
     }
   ],
   "integrations": {
@@ -280,6 +355,9 @@
     },
     "posthog": {
       "apiKey": "phc_Gz8DBv1ZMbOwt3hE8sJZwKGsDl5FtMSkvBNSR0HC07c"
+    },
+    "plausible": {
+      "domain": "composio.dev"
     }
   },
   "api": {
@@ -289,24 +367,56 @@
   },
   "redirects": [
     {
+      "source": "/apps/gitlab",
+      "destination": "https://app.composio.dev/apps"
+    },
+    {
+      "source": "/apps/bitbucket",
+      "destination": "https://app.composio.dev/apps"
+    },
+    {
+      "source": "/introduction/foundations/howtos/get_api_key",
+      "destination": "/patterns/howtos/get_api_key"
+    },
+    {
+      "source": "/sdk/cli/trigger",
+      "destination": "/patterns/cli/trigger"
+    },
+    {
+      "source": "/guides/:slug1*",
+      "destination": "/examples/:slug1*"
+    },
+    {
       "source": "/apps/usecases/langchain_blogs/:slug2*",
-      "destination": "https://composio.dev/tools/:slug2*"
+      "destination": "https://app.composio.dev/apps/:slug2*"
     },
     {
       "source": "/apps/usecases/crewai/:slug2*",
-      "destination": "https://composio.dev/tools/:slug2*"
+      "destination": "https://app.composio.dev/apps/:slug2*"
     },
     {
       "source": "/apps/usecases/autogen_blogs/:slug2*",
-      "destination": "https://composio.dev/tools/:slug2*"
+      "destination": "https://app.composio.dev/apps/:slug2*"
     },
     {
       "source": "/apps/:slug2*",
-      "destination": "https://composio.dev/tools/:slug2*"
+      "destination": "https://app.composio.dev/apps/:slug2*"
     },
     {
       "source": "/apps",
-      "destination": "https://composio.dev/tools/"
+      "destination": "https://app.composio.dev/apps"
+    },
+    {
+      "source": "/python/local_tools",
+      "destination": "/introduction/foundations/components/custom_actions"
+    },
+    {
+      "source": "/introduction/foundations/components/local_tools",
+      "destination": "/introduction/foundations/components/custom_actions"
+    },
+    {
+      "source": "/changelog",
+      "destination": "https://github.com/ComposioHQ/composio/releases"
     }
   ]
 }

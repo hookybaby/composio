@@ -6,16 +6,13 @@ import select
 import subprocess
 import time
 import typing as t
+from abc import abstractmethod
+from pathlib import Path
 
 import paramiko
 
-from composio.tools.env.base import Shell
+from composio.tools.env.base import Sessionable
 from composio.tools.env.constants import ECHO_EXIT_CODE, EXIT_CODE, STDERR, STDOUT
-from composio.tools.env.docker.scripts import (
-    SHELL_ENV_VARS,
-    SHELL_SOURCE_FILES,
-    SHELL_STATE_CMD,
-)
 from composio.tools.env.id import generate_id
 
 
@@ -35,6 +32,22 @@ _ANSI_ESCAPE = re.compile(
 )
 
 
+_DEV_SOURCE = Path("/home/user/.dev/bin/activate")
+_NOWAIT_CMDS = ("cd", "ls", "pwd")
+
+
+class Shell(Sessionable):
+    """Abstract shell session."""
+
+    def sanitize_command(self, cmd: str) -> bytes:
+        """Prepare command string."""
+        return (cmd.rstrip() + "\n").encode()
+
+    @abstractmethod
+    def exec(self, cmd: str, wait: bool = True) -> t.Dict:
+        """Execute command on container."""
+
+
 # TODO: Execute in a virtual environment
 class HostShell(Shell):
     """Host interactive shell."""
@@ -45,10 +58,7 @@ class HostShell(Shell):
         """Initialize shell."""
         super().__init__()
         self._id = generate_id()
-        self.environment = {
-            **(environment or {}),
-            **{key: str(val) for key, val in SHELL_ENV_VARS.items()},
-        }
+        self.environment = environment or {}
 
     def setup(self) -> None:
         """Setup host shell."""
@@ -60,6 +70,7 @@ class HostShell(Shell):
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=self.environment,
         )
         self.logger.debug(
             "Initial data from session: %s - %s",
@@ -67,19 +78,23 @@ class HostShell(Shell):
             self._read(wait=False),
         )
 
+        # Load development environment if available
+        if _DEV_SOURCE.exists():
+            self.logger.debug("Loading development environment")
+            self.exec(f"source {_DEV_SOURCE}")
+
+        # Setup environment
         for key, value in self.environment.items():
             self.exec(f"export {key}={value}")
             time.sleep(0.05)
 
-        self.exec(cmd=SHELL_STATE_CMD)
-        time.sleep(0.05)
-
-        for file in SHELL_SOURCE_FILES:
-            self.exec(cmd=f"source {file}")
-            time.sleep(0.05)
-
     def _has_command_exited(self, cmd: str) -> bool:
         """Waif for command to exit."""
+        _cmd, *_ = cmd.split(" ")
+        if _cmd in _NOWAIT_CMDS:
+            time.sleep(0.3)
+            return True
+
         output = subprocess.run(  # pylint: disable=subprocess-run-check
             ["ps", "-e"],
             stdout=subprocess.PIPE,
@@ -92,7 +107,6 @@ class HostShell(Shell):
         self._write(ECHO_EXIT_CODE)
         *_, exit_code = self._read(wait=False).get(STDOUT).strip().split("\n")  # type: ignore
         if len(exit_code) == 0:
-            # `edit` command sometimes does not work as expected
             return 0
         return int(exit_code)
 
@@ -128,11 +142,13 @@ class HostShell(Shell):
             raise RuntimeError(
                 f"Subprocess exited unexpectedly.\nCurrent buffer: {buffer}"
             )
+
         if time.time() >= end_time:
             raise TimeoutError(
                 "Timeout reached while reading from subprocess.\nCurrent "
                 f"buffer: {buffer}"
             )
+
         return {
             STDOUT: buffer[stdout].decode(),
             STDERR: buffer[stderr].decode(),
@@ -147,15 +163,15 @@ class HostShell(Shell):
         except BrokenPipeError as e:
             raise RuntimeError(str(e)) from e
 
-    def exec(self, cmd: str) -> t.Dict:
+    def exec(self, cmd: str, wait: bool = True) -> t.Dict:  # type: ignore
         """Execute command on container."""
         self._write(cmd=cmd)
         return {
-            **self._read(cmd=cmd, wait=True),
+            **self._read(cmd=cmd, wait=wait),
             EXIT_CODE: self._get_exit_code(),
         }
 
-    def stop(self) -> None:
+    def teardown(self) -> None:
         """Stop and remove the running shell."""
         self._process.kill()
 
@@ -170,18 +186,17 @@ class SSHShell(Shell):
         super().__init__()
         self._id = generate_id()
         self.client = client
-        self.channel = self.client.invoke_shell()
-        self.environment = {
-            **(environment or {}),
-            **SHELL_ENV_VARS,
-        }
+        self.environment = environment or {}
+        self.channel = self.client.invoke_shell(environment=self.environment)
 
     def setup(self) -> None:
         """Invoke shell."""
         self.logger.debug(f"Setting up shell: {self.id}")
-        self._send("export PS1=''")
-        time.sleep(0.05)
-        self._read()
+
+        # Load development environment if available
+        if _DEV_SOURCE.exists():
+            self.logger.debug("Loading development environment")
+            self.exec(f"source {_DEV_SOURCE}")
 
         # Setup environment
         for key, value in self.environment.items():
@@ -190,19 +205,17 @@ class SSHShell(Shell):
             self._read()
 
         # CD to user dir
-        self.exec(cmd="cd ~/")
+        self.exec(cmd="cd ~/ && export PS1=''")
 
-        # Setup shell state
-        self.exec(cmd=SHELL_STATE_CMD)
-
-        # Source the tool files
-        for file in SHELL_SOURCE_FILES:
-            self.exec(cmd=f"source {file}")
-            time.sleep(0.05)
-
-    def _send(self, buffer: str) -> None:
+    def _send(self, buffer: str, stdin: t.Optional[str] = None) -> None:
         """Send buffer to shell."""
-        self.channel.sendall(f"{buffer}\n".encode("utf-8"))
+        if stdin is None:
+            self.channel.sendall(f"{buffer}\n".encode("utf-8"))
+            time.sleep(0.05)
+            return
+
+        self.channel.send(f"{buffer}\n".encode("utf-8"))
+        self.channel.sendall(f"{stdin}\n".encode("utf-8"))
         time.sleep(0.05)
 
     def _read(self) -> str:
@@ -217,7 +230,7 @@ class SSHShell(Shell):
     def _wait(self, cmd: str) -> None:
         """Wait for the command to execute."""
         _cmd, *_rest = cmd.split(" ")
-        if _cmd in ("ls", "cd") or len(_rest) == 0:
+        if _cmd in _NOWAIT_CMDS or len(_rest) == 0:
             time.sleep(0.3)
             return
 
@@ -247,14 +260,15 @@ class SSHShell(Shell):
         clean = "\n".join(lines[1:])
         if clean.startswith("\r"):
             clean = clean[1:]
-        return clean
+        return clean.replace("(.dev)\n", "")
 
-    def exec(self, cmd: str) -> t.Dict:
+    def exec(self, cmd: str, wait: bool = True) -> t.Dict:
         """Execute a command and return output and exit code."""
         output = ""
         for _cmd in cmd.split(" && "):
             self._send(buffer=_cmd)
-            self._wait(cmd=_cmd)
+            if wait:
+                self._wait(cmd=_cmd)
             output += self._sanitize_output(output=self._read())
 
         return {
@@ -263,6 +277,6 @@ class SSHShell(Shell):
             EXIT_CODE: str(self._exit_status()),
         }
 
-    def stop(self) -> None:
+    def teardown(self) -> None:
         """Close the SSH channel."""
         self.channel.close()

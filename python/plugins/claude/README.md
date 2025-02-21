@@ -38,9 +38,9 @@ client = anthropic.Anthropic()
 
 This step involves fetching and integrating GitHub tools provided by Composio, enabling enhanced functionality for LangChain operations.
 ```python
-from composio_claude import App, ComposioToolset
+from composio_claude import App, ComposioToolSet
 
-toolset = ComposioToolset()
+toolset = ComposioToolSet()
 actions = toolset.get_tools(tools=App.GITHUB)
 ```
 
@@ -56,7 +56,7 @@ response = client.beta.tools.messages.create(
     model="claude-3-opus-20240229",
     max_tokens=1024,
     tools= actions,
-    messages=[{"role": "user", "content": "Star me sawradip/sawradip repo in github."}],
+    messages=[{"role": "user", "content": "Star me composiohq/composio repo in github."}],
 )
 pprint(response)
 ```

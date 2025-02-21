@@ -18,7 +18,7 @@ dotenv.load_dotenv()
 prompt = hub.pull("hwchase17/openai-functions-agent")
 
 # Initialize tools.
-openai_client = ChatOpenAI(model="gpt-4o")
+openai_client = ChatOpenAI(model="gpt-4-turbo")
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
 
     # Get All the tools
     tools = composio_toolset.get_actions(
-        actions=[Action.GITHUB_ACTIVITY_STAR_REPO_FOR_AUTHENTICATED_USER]
+        actions=[Action.GITHUB_STAR_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER]
     )
 
     # Define task

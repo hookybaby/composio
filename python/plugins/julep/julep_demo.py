@@ -25,7 +25,7 @@ client = Client(
 # Retrieve tools
 composio_tools = composio_toolset.get_tools(apps=[App.GITHUB])
 
-# Define assitant
+# Define assistant
 name = "Jessica"
 about = (
     "Jessica is a forward-thinking tech entrepreneur with a sharp "
@@ -50,7 +50,7 @@ agent = t.cast(
         name=name,
         about=about,
         default_settings=default_settings,
-        model="gpt-4o",
+        model="gpt-4-turbo",
         tools=composio_tools,
     ),
 )
@@ -111,4 +111,8 @@ response = client.sessions.chat(
 )
 
 # Execute function calls
-print(composio_toolset.handle_tool_calls(response))  # type: ignore
+print(
+    composio_toolset.handle_tool_calls(
+        response=response, session_id=session.id, julep_client=client
+    )
+)

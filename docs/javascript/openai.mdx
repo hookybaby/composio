@@ -1,7 +1,6 @@
 ---
 title: "Using Composio JS SDK with OpenAI"
-sidebarTitle: "Quickstart"
-icon: "code"
+sidebarTitle: "OpenAI (JS)"
 description: "Use Composio JS SDK with OpenAI to create a github issue creation agent"
 ---
 
@@ -23,7 +22,7 @@ description: "Use Composio JS SDK with OpenAI to create a github issue creation 
     }}/>
 <Steps>
 <Step title="Get Composio API Key">
-Follow this [Get API Key](/introduction/foundations/howtos/get_api_key) to get your Composio API Key
+Follow this [Get API Key](/faq/api_key/api_key/) to get your Composio API Key
 </Step>
 <Step title="Install Dependencies">
 <CodeGroup>
@@ -50,10 +49,10 @@ const appName = 'github';
 
 async function setupUserConnectionIfNotExists(entityId) {
         const entity = toolset.client.getEntity(entityId);
-        const connection = await entity.getConnection(appName);
+        const connection = await entity.getConnection({ appName: appName });
 
         if (!connection) {
-            const connection = await entity.initiateConnection(appName);
+            const connection = await entity.initiateConnection({appName: appName});
             console.log("Log in via: ", connection.redirectUrl);
             return connection.waitUntilActive(60);
         }
@@ -63,7 +62,7 @@ async function setupUserConnectionIfNotExists(entityId) {
       ```
     </CodeGroup>
 
-Learn more about entities [here](introduction/foundations/components/entity/entity-guide)
+Learn more about entities [here](../../patterns/Auth/connected_account)
 
 </Step>
 
@@ -75,7 +74,7 @@ async function executeAgent(repo,entityName="default") {
         const entity = toolset.client.getEntity(entityName)
         await setupUserConnectionIfNotExists(entity.id);
 
-        const tools = await toolset.get_actions({ actions: ["github_issues_create"] }, entity.id);
+        const tools = await toolset.getTools({ actions: ["github_issues_create"] }, entity.id);
         const instruction = `Make an issue with sample title in the repo - ${repo}`
 
         const client = new OpenAI({ apiKey: OPEN_AI_API_KEY })
@@ -90,7 +89,7 @@ async function executeAgent(repo,entityName="default") {
         })
 
         console.log(response.choices[0].message.tool_calls);
-        await toolset.handle_tool_call(response, entity.id);
+        await toolset.handleToolCall(response, entity.id);
 }
 
       ```

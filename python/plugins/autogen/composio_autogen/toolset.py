@@ -4,78 +4,53 @@ import typing as t
 from inspect import Signature
 
 import autogen
+import typing_extensions as te
 from autogen.agentchat.conversable_agent import ConversableAgent
+from autogen_core.tools import FunctionTool
 
-from composio import Action, ActionType, AppType, TagType, WorkspaceConfigType
-from composio.constants import DEFAULT_ENTITY_ID
+from composio import Action, ActionType, AppType, TagType
 from composio.tools import ComposioToolSet as BaseComposioToolSet
+from composio.tools.toolset import ProcessorsType
 from composio.utils.shared import get_signature_format_from_schema_params
 
 
-class ComposioToolSet(BaseComposioToolSet):
+class ComposioToolSet(
+    BaseComposioToolSet,
+    runtime="autogen",
+    description_char_limit=1024,
+    action_name_char_limit=64,
+):
     """
     Composio toolset for autogen framework.
     """
 
-    def __init__(
-        self,
-        caller: t.Optional[ConversableAgent] = None,
-        executor: t.Optional[ConversableAgent] = None,
-        api_key: t.Optional[str] = None,
-        base_url: t.Optional[str] = None,
-        entity_id: str = DEFAULT_ENTITY_ID,
-        output_in_file: bool = False,
-        workspace_config: t.Optional[WorkspaceConfigType] = None,
-        workspace_id: t.Optional[str] = None,
-    ) -> None:
-        """
-        Initialize composio toolset.
-
-        :param caller: Caller agent.
-        :param executor: Executor agent.
-        :param api_key: Composio API key
-        :param base_url: Base URL for the Composio API server
-        :param entity_id: Entity ID for making function calls
-        :param output_in_file: Whether to write output to a file
-        """
-        super().__init__(
-            api_key=api_key,
-            base_url=base_url,
-            runtime="autogen",
-            entity_id=entity_id,
-            output_in_file=output_in_file,
-            workspace_config=workspace_config,
-            workspace_id=workspace_id,
-        )
-        self.caller = caller
-        self.executor = executor
-
     def register_tools(
         self,
-        tools: t.Sequence[AppType],
-        caller: t.Optional[ConversableAgent] = None,
-        executor: t.Optional[ConversableAgent] = None,
-        tags: t.Optional[t.Sequence[TagType]] = None,
+        caller: ConversableAgent,
+        executor: ConversableAgent,
+        actions: t.Optional[t.Sequence[ActionType]] = None,
+        apps: t.Optional[t.Sequence[AppType]] = None,
+        tags: t.Optional[t.List[TagType]] = None,
         entity_id: t.Optional[str] = None,
     ) -> None:
         """
         Register tools to the proxy agents.
 
-        :param tools: List of tools to register.
-        :param caller: Caller agent.
         :param executor: Executor agent.
-        :param tags: Filter by the list of given Tags.
+        :param caller: Caller agent.
+        :param apps: List of apps to wrap
+        :param actions: List of actions to wrap
+        :param tags: Filter the apps by given tags
+        :param entity_id: Entity ID for the function wrapper
         :param entity_id: Entity ID to use for executing function calls.
         """
-        caller = caller or self.caller
-        if caller is None:
-            raise RuntimeError("Please provide `caller` agent")
-
-        executor = executor or self.executor
-        if executor is None:
-            raise RuntimeError("Please provide `executor` agent")
-
-        schemas = self.get_action_schemas(apps=tools, tags=tags)
+        self.validate_tools(apps=apps, actions=actions, tags=tags)
+        schemas = self.get_action_schemas(
+            actions=actions,
+            apps=apps,
+            tags=tags,
+            _populate_requested=True,
+        )
         for schema in schemas:
             self._register_schema_to_autogen(
                 schema=schema.model_dump(
@@ -88,11 +63,12 @@ class ComposioToolSet(BaseComposioToolSet):
                 entity_id=entity_id or self.entity_id,
             )
 
+    @te.deprecated("Use `ComposioToolSet.register_tools` instead")
     def register_actions(
         self,
+        caller: ConversableAgent,
+        executor: ConversableAgent,
         actions: t.Sequence[ActionType],
-        caller: t.Optional[ConversableAgent] = None,
-        executor: t.Optional[ConversableAgent] = None,
         entity_id: t.Optional[str] = None,
     ):
         """
@@ -103,27 +79,12 @@ class ComposioToolSet(BaseComposioToolSet):
         :param executor: Executor agent.
         :param entity_id: Entity ID to use for executing function calls.
         """
-
-        caller = caller or self.caller
-        if caller is None:
-            raise RuntimeError("Please provide `caller` agent")
-
-        executor = executor or self.executor
-        if executor is None:
-            raise RuntimeError("Please provide `executor` agent")
-
-        schemas = self.get_action_schemas(actions=actions)
-        for schema in schemas:
-            self._register_schema_to_autogen(
-                schema=schema.model_dump(
-                    exclude_defaults=True,
-                    exclude_none=True,
-                    exclude_unset=True,
-                ),
-                caller=caller,
-                executor=executor,
-                entity_id=entity_id or self.entity_id,
-            )
+        self.register_tools(
+            caller=caller,
+            executor=executor,
+            actions=actions,
+            entity_id=entity_id,
+        )
 
     def _process_function_name_for_registration(
         self,
@@ -167,6 +128,7 @@ class ComposioToolSet(BaseComposioToolSet):
                 action=Action(value=name),
                 params=kwargs,
                 entity_id=entity_id or self.entity_id,
+                _check_requested_actions=True,
             )
 
         function = types.FunctionType(
@@ -177,10 +139,14 @@ class ComposioToolSet(BaseComposioToolSet):
             ),
             closure=execute_action.__closure__,
         )
-        function.__signature__ = Signature(  # type: ignore
-            parameters=get_signature_format_from_schema_params(
-                schema_params=schema["parameters"],
-            ),
+        params = get_signature_format_from_schema_params(
+            schema_params=schema["parameters"],
+        )
+        setattr(function, "__signature__", Signature(parameters=params))
+        setattr(
+            function,
+            "__annotations__",
+            {p.name: p.annotation for p in params} | {"return": t.Dict[str, t.Any]},
         )
         function.__doc__ = (
             description if description else f"Action {name} from {appName}"
@@ -194,3 +160,102 @@ class ComposioToolSet(BaseComposioToolSet):
             ),
             description=description if description else f"Action {name} from {appName}",
         )
+
+    def _wrap_tool(
+        self,
+        schema: t.Dict[str, t.Any],
+        entity_id: t.Optional[str] = None,
+    ) -> FunctionTool:
+        """
+        Wraps a composio action as an Autogen FunctionTool.
+
+        Args:
+            schema: The action schema to wrap
+            entity_id: Optional entity ID for executing function calls
+
+        Returns:
+            FunctionTool: Wrapped function as an Autogen FunctionTool
+        """
+        name = schema["name"]
+        description = schema["description"] or f"Action {name} from {schema['appName']}"
+
+        def execute_action(**kwargs: t.Any) -> t.Dict:
+            """Placeholder function for executing action."""
+            return self.execute_action(
+                action=Action(value=name),
+                params=kwargs,
+                entity_id=entity_id or self.entity_id,
+                _check_requested_actions=True,
+            )
+
+        # Create function with proper signature
+        function = types.FunctionType(
+            code=execute_action.__code__,
+            globals=globals(),
+            name=self._process_function_name_for_registration(input_string=name),
+            closure=execute_action.__closure__,
+        )
+
+        # Set signature and annotations
+        params = get_signature_format_from_schema_params(
+            schema_params=schema["parameters"]
+        )
+        setattr(function, "__signature__", Signature(parameters=params))
+        setattr(
+            function,
+            "__annotations__",
+            {p.name: p.annotation for p in params} | {"return": t.Dict[str, t.Any]},
+        )
+        function.__doc__ = description
+
+        return FunctionTool(
+            func=function,
+            description=description,
+            name=self._process_function_name_for_registration(input_string=name),
+        )
+
+    def get_tools(
+        self,
+        actions: t.Optional[t.Sequence[ActionType]] = None,
+        apps: t.Optional[t.Sequence[AppType]] = None,
+        tags: t.Optional[t.List[TagType]] = None,
+        entity_id: t.Optional[str] = None,
+        *,
+        processors: t.Optional[ProcessorsType] = None,
+        check_connected_accounts: bool = True,
+    ) -> t.Sequence[FunctionTool]:
+        """
+        Get composio tools as Autogen FunctionTool objects.
+
+        Args:
+            actions: List of actions to wrap
+            apps: List of apps to wrap
+            tags: Filter apps by given tags
+            entity_id: Entity ID for function wrapper
+            processors: Optional dict of processors to merge
+            check_connected_accounts: Whether to check for connected accounts
+
+        Returns:
+            List of Autogen FunctionTool objects
+        """
+        self.validate_tools(apps=apps, actions=actions, tags=tags)
+        if processors is not None:
+            self._processor_helpers.merge_processors(processors)
+
+        tools = [
+            self._wrap_tool(
+                schema=tool.model_dump(
+                    exclude_none=True,
+                ),
+                entity_id=entity_id or self.entity_id,
+            )
+            for tool in self.get_action_schemas(
+                actions=actions,
+                apps=apps,
+                tags=tags,
+                check_connected_accounts=check_connected_accounts,
+                _populate_requested=True,
+            )
+        ]
+
+        return tools

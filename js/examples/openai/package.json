@@ -4,14 +4,16 @@
   "description": "",
   "main": "demo.mjs",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "debug": "COMPOSIO_API_KEY=ADD_YOUR_KEY_HERE node sample.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "composio-core": "^0.1.4",
+    "composio-core": "latest",
+    "dotenv": "^16.4.7",
     "express": "^4.19.2"
   }
 }

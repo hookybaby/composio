@@ -16,7 +16,7 @@ chatbot = AssistantAgent(
     system_message="Reply TERMINATE when the task is done or when user's content is empty",
     llm_config={
         "config_list": [
-            {"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]},
+            {"model": "gpt-4-turbo", "api_key": os.environ["OPENAI_API_KEY"]},
         ]
     },
 )
@@ -39,7 +39,7 @@ def main():
 
     # Register the preferred Applications, with right executor.
     composio_toolset.register_tools(
-        tools=[App.GITHUB], caller=chatbot, executor=user_proxy
+        apps=[App.GITHUB], caller=chatbot, executor=user_proxy
     )
 
     # Define task.

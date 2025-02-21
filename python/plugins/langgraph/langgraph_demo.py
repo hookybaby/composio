@@ -16,7 +16,7 @@ from composio_langgraph import Action, ComposioToolSet
 
 composio_toolset = ComposioToolSet()
 tools = composio_toolset.get_actions(
-    actions=[Action.GITHUB_ACTIVITY_STAR_REPO_FOR_AUTHENTICATED_USER]
+    actions=[Action.GITHUB_STAR_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER]
 )
 tool_executor = ToolExecutor(tools)
 functions = [convert_to_openai_function(t) for t in tools]
@@ -85,14 +85,11 @@ workflow.add_edge("tool", "agent")
 workflow.set_entry_point("agent")
 
 app = workflow.compile()
-
-
 inputs = {
-    "messages": [HumanMessage(content="Star the Github Repository sawradip/sawradip")]
+    "messages": [
+        HumanMessage(content="Star a repo composiohq/composio on GitHub"),
+    ]
 }
-# response = app.invoke(inputs)
-# print(response)
-
 for output in app.stream(inputs):
     for key, value in output.items():
         print(f"Output from node '{key}':")

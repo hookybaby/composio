@@ -17,7 +17,7 @@ def swekit() -> None:
 
 
 @swekit.command(name="scaffold")
-@click.argument("framework", type=EnumParam(cls=AgenticFramework))
+@click.argument("type", type=EnumParam(cls=AgentType))
 @click.option(
     "-n",
     "--name",
@@ -31,18 +31,18 @@ def swekit() -> None:
     help="Output directory for the agent",
 )
 @click.option(
-    "-t",
-    "--type",
-    type=EnumParam(cls=AgentType),
+    "-f",
+    "--framework",
+    type=EnumParam(cls=AgenticFramework),
     help="Type of agent to scaffold, defaults to SWE",
-    default=AgentType.SWE,
+    default=AgenticFramework.LANGGRAPH,
 )
 @click.help_option("--help")
 def _scaffold(
     framework: AgenticFramework,
     name: t.Optional[str] = None,
     outdir: t.Optional[Path] = None,
-    agent_type: AgentType = AgentType.SWE,
+    type: AgentType = AgentType.SWE,
 ) -> None:
     """🤖 Scaffold agent using composio toolset."""
     try:
@@ -50,7 +50,7 @@ def _scaffold(
             framework=framework,
             name=name,
             outdir=outdir,
-            agent_type=agent_type,
+            agent_type=type,
         )
         click.echo(f"🤖 Scaffolded agent @ {output}")
     except SWEKitError as e:

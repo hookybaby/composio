@@ -1,295 +1,299 @@
-import axios, { AxiosInstance } from 'axios';
-import { ConnectedAccounts, ConnectionRequest } from './models/connectedAccounts';
-import { Apps } from './models/apps';
-import { Actions } from './models/actions';
-import { Triggers } from './models/triggers';
-import { Integrations } from './models/integrations';
-import { ActiveTriggers } from './models/activeTriggers';
-import { AuthScheme, GetConnectedAccountResponse, ListActiveTriggersResponse, ListAllConnectionsResponse, OpenAPI, PatchUpdateActiveTriggerStatusResponse, SetupTriggerResponse } from './client';
-import { getEnvVariable } from '../utils/shared';
-import { COMPOSIO_BASE_URL } from './client/core/OpenAPI';
+import axios from "axios";
+import { z } from "zod";
+import { COMPOSIO_VERSION } from "../constants";
+import {
+  ZGetExpectedParamsForUserParams,
+  ZGetExpectedParamsRes,
+} from "../types/composio";
+import { getUUID } from "../utils/common";
+import logger from "../utils/logger";
+import { Entity } from "./models/Entity";
+import { Actions } from "./models/actions";
+import { ActiveTriggers } from "./models/activeTriggers";
+import { Apps } from "./models/apps";
+import { AxiosBackendClient } from "./models/backendClient";
+import { ConnectedAccounts } from "./models/connectedAccounts";
+import { Integrations } from "./models/integrations";
+import { Triggers } from "./models/triggers";
+import { ZAuthMode } from "./types/integration";
+import ComposioSDKContext from "./utils/composioContext";
+import { getSDKConfig } from "./utils/config";
+import { IS_DEVELOPMENT_OR_CI } from "./utils/constants";
+import { CEG } from "./utils/error";
+import { COMPOSIO_SDK_ERROR_CODES } from "./utils/errors/src/constants";
+import { isNewerVersion } from "./utils/other";
+import { TELEMETRY_LOGGER } from "./utils/telemetry";
+import { TELEMETRY_EVENTS } from "./utils/telemetry/events";
+
+export type ComposioInputFieldsParams = z.infer<
+  typeof ZGetExpectedParamsForUserParams
+>;
+export type ComposioInputFieldsRes = z.infer<typeof ZGetExpectedParamsRes>;
 
 export class Composio {
-    public apiKey: string;
-    public baseUrl: string;
-    private http: AxiosInstance;
+  /**
+   * The Composio class serves as the main entry point for interacting with the Composio SDK.
+   * It provides access to various models that allow for operations on connected accounts, apps,
+   * actions, triggers, integrations, and active triggers.
+   */
+  backendClient: AxiosBackendClient;
+  connectedAccounts: ConnectedAccounts;
+  apps: Apps;
+  actions: Actions;
+  triggers: Triggers;
+  integrations: Integrations;
+  activeTriggers: ActiveTriggers;
 
+  fileName: string = "js/src/sdk/index.ts";
 
-    connectedAccounts: ConnectedAccounts;
-    apps: Apps;
-    actions: Actions;
-    triggers: Triggers;
-    integrations: Integrations;
-    activeTriggers: ActiveTriggers;
-    config: typeof OpenAPI;
+  /**
+   * Initializes a new instance of the Composio class.
+   *
+   * @param {Object} config - Configuration object for the Composio SDK
+   * @param {string} [config.apiKey] - The API key for authenticating with the Composio backend. Can also be set locally in an environment variable.
+   * @param {string} [config.baseUrl] - The base URL for the Composio backend. By default, it is set to the production URL.
+   * @param {string} [config.runtime] - The runtime environment for the SDK.
+   */
+  constructor(
+    config: { apiKey?: string; baseUrl?: string; runtime?: string } = {}
+  ) {
+    // Parse the base URL and API key, falling back to environment variables or defaults if not provided
+    const { baseURL: baseURLParsed, apiKey: apiKeyParsed } = getSDKConfig(
+      config?.baseUrl,
+      config?.apiKey
+    );
 
-    constructor(apiKey?: string, baseUrl?: string, runtime?: string) {
-        this.apiKey = apiKey || getEnvVariable("COMPOSIO_API_KEY") || '';
-        if (!this.apiKey) {
-            throw new Error('API key is missing');
+    if (IS_DEVELOPMENT_OR_CI) {
+      logger.info(
+        `Initializing Composio w API Key: [REDACTED] and baseURL: ${baseURLParsed}`
+      );
+    }
+    ComposioSDKContext.apiKey = apiKeyParsed;
+    ComposioSDKContext.sessionId = getUUID();
+    ComposioSDKContext.baseURL = baseURLParsed;
+    ComposioSDKContext.frameworkRuntime = config?.runtime;
+    ComposioSDKContext.composioVersion = COMPOSIO_VERSION;
+
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_INITIALIZED, {});
+
+    if (!apiKeyParsed) {
+      throw CEG.getCustomError(
+        COMPOSIO_SDK_ERROR_CODES.COMMON.API_KEY_UNAVAILABLE,
+        {
+          message: "🔑 API Key is not provided",
+          description:
+            "You need to provide it in the constructor or as an environment variable COMPOSIO_API_KEY",
+          possibleFix:
+            "Please provide a valid API Key. You can get it from https://app.composio.dev/settings OR Check if you are passing it as an object in the constructor like - { apiKey: 'your-api-key' }",
         }
-
-        this.baseUrl = baseUrl || Composio.getApiUrlBase();
-        this.http = axios.create({
-            baseURL: this.baseUrl,
-            headers: {
-                'X-API-KEY': `${this.apiKey}`,
-                'X-SOURCE': 'js_sdk',
-                'X-RUNTIME': runtime
-            }
-        });
-
-        this.config = {
-            ...OpenAPI,
-            BASE: this.baseUrl,
-            HEADERS: {
-                'X-API-Key': `${this.apiKey}`,
-                'X-SOURCE': 'js_sdk',
-                // @ts-ignore
-                'X-RUNTIME': runtime
-            }
-        }
-
-        this.connectedAccounts = new ConnectedAccounts(this);
-        this.apps = new Apps(this);
-        this.actions = new Actions(this);
-        this.triggers = new Triggers(this);
-        this.integrations = new Integrations(this);
-        this.activeTriggers = new ActiveTriggers(this);
-
+      );
     }
 
-    public async getClientId(): Promise<string> {
-        const response = await this.http.get('/v1/client/auth/client_info',{
-            headers: {
-                'X-API-KEY': `${this.apiKey}`
-            }
-        });
-        if (response.status !== 200) {
-            throw new Error(`HTTP Error: ${response.status}`);
-        }
-        return response.data.client.id;
+    logger.info(
+      `Initializing Composio w API Key: [REDACTED] and baseURL: ${baseURLParsed}`
+    );
+
+    // Initialize the BackendClient with the parsed API key and base URL.
+    this.backendClient = new AxiosBackendClient(
+      apiKeyParsed,
+      baseURLParsed,
+      config?.runtime
+    );
+
+    // Instantiate models with dependencies as needed.
+    this.connectedAccounts = new ConnectedAccounts(this.backendClient);
+    this.triggers = new Triggers(this.backendClient);
+    this.apps = new Apps(this.backendClient);
+    this.actions = new Actions(this.backendClient);
+    this.integrations = new Integrations(this.backendClient);
+    this.activeTriggers = new ActiveTriggers(this.backendClient);
+
+    this.checkForLatestVersionFromNPM();
+  }
+
+  /**
+   * Checks for the latest version of the Composio SDK from NPM.
+   * If a newer version is available, it logs a warning to the console.
+   */
+  private async checkForLatestVersionFromNPM() {
+    try {
+      const packageName = "composio-core";
+      const currentVersionFromPackageJson = COMPOSIO_VERSION;
+
+      const response = await axios.get(
+        `https://registry.npmjs.org/${packageName}/latest`
+      );
+      const latestVersion = response.data.version;
+
+      if (
+        isNewerVersion(latestVersion, currentVersionFromPackageJson) &&
+        !IS_DEVELOPMENT_OR_CI
+      ) {
+        logger.info(
+          `🚀 Upgrade available! Your composio-core version (${currentVersionFromPackageJson}) is behind. Latest version: ${latestVersion}.`
+        );
+      }
+    } catch (_error) {
+      // Ignore and do nothing
+    }
+  }
+
+  /**
+   * Retrieves an Entity instance associated with a given ID.
+   *
+   * @param {string} [id='default'] - The ID of the entity to retrieve.
+   * @returns {Entity} An instance of the Entity class.
+   */
+  getEntity(id: string = "default"): Entity {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "getEntity",
+      file: this.fileName,
+      params: { id },
+    });
+    return new Entity(this.backendClient, id);
+  }
+
+  async getExpectedParamsForUser(
+    params: ComposioInputFieldsParams
+  ): Promise<ComposioInputFieldsRes> {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "getExpectedParamsForUser",
+      file: this.fileName,
+      params: params,
+    });
+    const { app } = params;
+    let { integrationId } = params;
+    if (integrationId === null && app === null) {
+      throw new Error("Both `integration_id` and `app` cannot be None");
     }
 
-    static getApiUrlBase(): string {
-        return getEnvVariable("COMPOSIO_BASE_URL", COMPOSIO_BASE_URL) as string;
+    if (!integrationId) {
+      try {
+        const integrations = await this.integrations.list({
+          appName: app!,
+          showDisabled: false,
+        });
+        if (params.authScheme && integrations) {
+          integrations.items = integrations.items.filter(
+            (integration) => integration.authScheme === params.authScheme
+          );
+        }
+        integrationId = integrations?.items[0]?.id as string;
+      } catch (_) {
+        // do nothing
+      }
     }
 
-    static async generateAuthKey(baseUrl?: string): Promise<string> {
-        const http = axios.create({
-            baseURL: baseUrl || this.getApiUrlBase(),
-            headers: {
-                'Authorization': ''
-            }
-        });
-        const response = await http.get('/v1/cli/generate_cli_session');
-        if (response.status !== 200) {
-            throw new Error(`HTTP Error: ${response.status}`);
-        }
-        return response.data.key;
+    let integration = integrationId
+      ? await this.integrations.get({
+          integrationId: integrationId!,
+        })
+      : undefined;
+
+    if (integration) {
+      return {
+        expectedInputFields: integration.expectedInputFields,
+        integrationId: integration.id!,
+        authScheme: integration.authScheme as z.infer<typeof ZAuthMode>,
+      };
     }
 
-    static async validateAuthSession(key: string, code: string, baseUrl?: string): Promise<string> {
-        const http = axios.create({
-            baseURL: baseUrl || this.getApiUrlBase(),
-            headers: {
-                'Authorization': ''
-            }
-        });
-        const response = await http.get(`/v1/cli/verify_cli_code`, {
-            params: { key, code }
-        });
-        if (response.status !== 200) {
-            throw new Error(`HTTP Error: ${response.status}`);
+    const appInfo = await this.apps.get({
+      appKey: app!.toLocaleLowerCase(),
+    });
+
+    const preferredAuthScheme = [
+      "OAUTH2",
+      "OAUTH1",
+      "API_KEY",
+      "BASIC",
+      "BEARER_TOKEN",
+      "BASIC_WITH_JWT",
+    ];
+
+    let schema: (typeof preferredAuthScheme)[number] | undefined =
+      params.authScheme;
+
+    if (!schema) {
+      for (const scheme of preferredAuthScheme) {
+        if (
+          appInfo.auth_schemes
+            ?.map((_authScheme) => _authScheme.mode)
+            .includes(scheme)
+        ) {
+          schema = scheme;
+          break;
         }
-        return response.data.apiKey;
+      }
     }
 
-    getEntity(id: string = 'default'): Entity {
-        return new Entity(this, id);
-    }
-}
+    const hasTestConnectors = (appInfo.testConnectors?.length ?? 0) > 0;
+    const authSchemeFields = appInfo.auth_schemes?.find(
+      (_authScheme) => _authScheme.mode === schema
+    )?.fields;
+    const requiredCustomerFields =
+      (
+        authSchemeFields as {
+          expected_from_customer: boolean;
+        }[]
+      )?.filter((field) => !field.expected_from_customer)?.length ?? 0;
 
-export class Entity {
-    private client: Composio;
-    id: string;
+    const areNoFieldsRequiredForIntegration =
+      hasTestConnectors || requiredCustomerFields === 0;
 
-    constructor(client: Composio, id: string = 'DEFAULT_ENTITY_ID') {
-        this.client = client;
-        this.id = id;
-    }
-
-    async execute(actionName: string, params?: Record<string, any> | undefined, text?: string | undefined, connectedAccountId?: string): Promise<Record<string, any>> {
-        const action = await this.client.actions.get({
-            actionName: actionName
-        });
-        if (!action) {
-            throw new Error("Could not find action: " + actionName);
-        }
-        const app = await this.client.apps.get({
-            appKey: action.appKey!
-        });
-        if ((app.yaml as any).no_auth) {
-            return this.client.actions.execute({
-                actionName: actionName,
-                requestBody: {
-                    input: params,
-                    appName: action.appKey
-                }
-            });
-        }
-        let connectedAccount = null;
-        if(connectedAccountId) {
-            connectedAccount = await this.client.connectedAccounts.get({
-                connectedAccountId: connectedAccountId
-            });
-        } else {
-            const connectedAccounts = await this.client.connectedAccounts.list({
-                user_uuid: this.id,
-                appNames: [action.appKey!],
-                status: 'ACTIVE'
-            });
-            if (connectedAccounts.items!.length === 0) {
-                throw new Error('No connected account found');
-            }
-
-            connectedAccount = connectedAccounts.items![0];
-        }
-        return this.client.actions.execute({
-            actionName: actionName,
-            requestBody: {
-                connectedAccountId: connectedAccount.id,
-                input: params,
-                appName: action.appKey,
-                text: text
-            }
-        });
+    if (!areNoFieldsRequiredForIntegration) {
+      throw new Error(
+        `No default credentials available for this app, please create new integration by going to app.composio.dev or through CLI - composio add ${appInfo.key}`
+      );
     }
 
-    async getConnection(app?: string, connectedAccountId?: string): Promise<GetConnectedAccountResponse | null> {
-        if (connectedAccountId) {
-            return await this.client.connectedAccounts.get({
-                connectedAccountId
-            });
-        }
+    const timestamp = new Date().toISOString().replace(/[-:.]/g, "");
+    const hasRelevantTestConnectors = params.authScheme
+      ? appInfo.testConnectors?.filter(
+          (connector) => connector.authScheme === params.authScheme
+        )?.length! > 0
+      : appInfo.testConnectors?.length! > 0;
+    if (hasRelevantTestConnectors) {
+      integration = await this.integrations.create({
+        appId: appInfo.appId,
+        name: `integration_${timestamp}`,
+        authScheme: schema as z.infer<typeof ZAuthMode>,
+        authConfig: {},
+        useComposioAuth: true,
+      });
 
-        let latestAccount = null;
-        let latestCreationDate: Date | null = null;
-        const connectedAccounts = await this.client.connectedAccounts.list({
-            user_uuid: this.id,
-        });
-
-        if(!connectedAccounts.items || connectedAccounts.items.length === 0) {
-            return null;
-        }
-
-        for (const connectedAccount of connectedAccounts.items!) {
-            if (app === connectedAccount.appName) {
-                const creationDate = new Date(connectedAccount.createdAt!);
-                if ((!latestAccount || (latestCreationDate && creationDate > latestCreationDate)) && connectedAccount.status === "ACTIVE") {
-                    latestCreationDate = creationDate;
-                    latestAccount = connectedAccount;
-                }
-            }
-        }
-
-        if (!latestAccount) {
-            return null;
-        }
-
-        return this.client.connectedAccounts.get({
-            connectedAccountId: latestAccount.id!
-        });
+      return {
+        expectedInputFields: integration?.expectedInputFields!,
+        integrationId: integration?.id!,
+        authScheme: integration?.authScheme as z.infer<typeof ZAuthMode>,
+      };
     }
 
-    async setupTrigger(app: string, triggerName: string, config: { [key: string]: any }): Promise<SetupTriggerResponse> {
-        /**
-         * Enable a trigger for an entity.
-         *
-         * @param app App name
-         * @param triggerName Trigger name
-         * @param config Trigger config
-         */
-        const connectedAccount = await this.getConnection(app);
-        if (!connectedAccount) {
-            throw new Error(`Could not find a connection with app='${app}' and entity='${this.id}'`);
-        }
-        return this.client.triggers.setup({
-            triggerName: triggerName,
-            connectedAccountId: connectedAccount.id!,
-            requestBody: {
-                triggerConfig: config,
-            }
-        });
+    if (!schema) {
+      throw new Error(
+        `No supported auth scheme found for \`${String(app)}\`, ` +
+          "Please create an integration and use the ID to " +
+          "get the expected parameters."
+      );
     }
 
-    async disableTrigger(triggerId: string): Promise<PatchUpdateActiveTriggerStatusResponse> {
-        /**
-         * Disable a trigger for an entity.
-         *
-         * @param triggerId Trigger ID
-         */
-        return this.client.activeTriggers.disable({ triggerId: triggerId });
+    integration = await this.integrations.create({
+      appId: appInfo.appId,
+      name: `integration_${timestamp}`,
+      authScheme: schema as z.infer<typeof ZAuthMode>,
+      authConfig: {},
+      useComposioAuth: false,
+    });
+
+    if (!integration) {
+      throw new Error(
+        "An unexpected error occurred while creating the integration, please create an integration manually and use its ID to get the expected parameters"
+      );
     }
-
-    async getConnections(): Promise<ListAllConnectionsResponse["items"]> {
-        /**
-         * Get all connections for an entity.
-         */
-        const connectedAccounts = await this.client.connectedAccounts.list({
-            user_uuid: this.id
-        });
-        return connectedAccounts.items!;
-    }
-
-    async getActiveTriggers(): Promise<ListActiveTriggersResponse["triggers"]> {
-        /**
-         * Get all active triggers for an entity.
-         */
-        const connectedAccounts = await this.getConnections();
-        const activeTriggers = await this.client.activeTriggers.list({
-            connectedAccountIds: connectedAccounts!.map(account => account.id!).join(",")
-        });
-        return activeTriggers.triggers!;
-    }
-
-    async initiateConnection(
-        appName: string,
-        authMode?: AuthScheme,
-        authConfig?: { [key: string]: any },
-        redirectUrl?: string,
-        integrationId?: string
-    ): Promise<ConnectionRequest> {
-
-        // Get the app details from the client
-        const app = await this.client.apps.get({ appKey: appName });
-        const timestamp = new Date().toISOString().replace(/[-:.]/g, "");
-
-        let integration = integrationId ? await this.client.integrations.get({ integrationId: integrationId }) : null;
-        // Create a new integration if not provided
-        if (!integration && authMode) {
-            integration = await this.client.integrations.create({
-                appId: app.appId!,
-                name: `integration_${timestamp}`,
-                authScheme: authMode,
-                authConfig: authConfig,
-                useComposioAuth: false,
-            });
-        }
-
-        if (!integration && !authMode) {
-            integration = await this.client.integrations.create({
-                appId: app.appId!,
-                name: `integration_${timestamp}`,
-                useComposioAuth: true,
-            });
-        }
-
-        // Initiate the connection process
-        return this.client.connectedAccounts.initiate({
-            integrationId: integration!.id!,
-            userUuid: this.id,
-            redirectUri: redirectUrl,
-        });
-    }
+    return {
+      expectedInputFields: integration.expectedInputFields,
+      integrationId: integration.id!,
+      authScheme: integration.authScheme as z.infer<typeof ZAuthMode>,
+    };
+  }
 }

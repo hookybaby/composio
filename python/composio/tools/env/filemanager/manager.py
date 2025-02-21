@@ -10,9 +10,9 @@ from pathlib import Path
 
 import typing_extensions as te
 
+from composio.tools.env.base import Sessionable
 from composio.tools.env.filemanager.file import File
 from composio.tools.env.id import generate_id
-from composio.utils.logging import WithLogger
 
 
 _active_manager: t.Optional["FileManager"] = None
@@ -39,7 +39,7 @@ class FindResult(te.TypedDict):
     file: str
 
 
-class FileManager(WithLogger):
+class FileManager(Sessionable):
     """File manager implementation for agent workspaces."""
 
     _files: t.Dict[Path, File]
@@ -50,10 +50,15 @@ class FileManager(WithLogger):
     def __init__(self, working_dir: t.Optional[str] = None) -> None:
         """Initialize file manager."""
         super().__init__()
-        self.id = generate_id()
+        self._id = generate_id()
+        self._files = {}
         self.working_dir = Path(working_dir or "./").resolve()
 
-        self._files = {}
+    def setup(self) -> None:
+        """Setup browser manager."""
+
+    def teardown(self) -> None:
+        """Teardown a browser manager."""
 
     @property
     def recent(self) -> t.Optional[File]:
@@ -77,19 +82,39 @@ class FileManager(WithLogger):
             os.chdir(self._pwd)
         set_current_file_manager(manager=None)
 
+    def resolve_dir(self, dir: t.Union[Path, str]) -> Path:
+        """Resolve a directory path."""
+        return (
+            Path(dir).resolve()
+            if Path(dir).is_absolute()
+            else (self.working_dir / dir).resolve()
+        )
+
     def chdir(self, path: t.Union[Path, str]) -> None:
         """
         Change the current working directory.
 
         Args:
             path (Union[Path, str]): The path to the new working directory.
+                Can be absolute, relative to the current working directory,
+                or use '..' to navigate up the directory tree.
 
         Raises:
             FileNotFoundError: If the specified directory does not exist.
             PermissionError: If the user doesn't have permission to access the directory.
         """
         try:
-            new_dir = Path(path).resolve()
+            # Handle absolute, relative, and parent directory navigation
+            new_dir = Path(path)
+            if not new_dir.is_absolute():
+                new_dir = (self.working_dir / new_dir).resolve()
+            else:
+                new_dir = new_dir.resolve()
+
+            # Ensure the resolved path is within the allowed directory structure
+            if not new_dir.is_relative_to(self.working_dir.anchor):
+                raise PermissionError(f"Access denied: Cannot navigate to '{new_dir}'")
+
             if not new_dir.is_dir():
                 raise FileNotFoundError(f"'{new_dir}' is not a valid directory.")
             if not os.access(new_dir, os.R_OK | os.X_OK):
@@ -120,6 +145,25 @@ class FileManager(WithLogger):
         self._recent = self._files[path]
         return self._recent
 
+    def rename(self, old_file_path: str, new_file_path: str) -> bool:
+        """
+        Renames a file or directory.
+        :param old_file_path: Path of the file, make sure the path is relative to
+            the working directory.
+        :param new_file_path: Path of the file, make sure the path is relative to
+            the working directory.
+        :return:
+        """
+
+        old_path = self.working_dir / old_file_path
+        new_path = self.working_dir / new_file_path
+        if not old_path.exists():
+            raise FileNotFoundError(f"File / Directory {old_path} does not exist!")
+        if new_path.exists():
+            raise FileExistsError(f"File / Directory {new_path} already exists!")
+        old_path.rename(new_path)
+        return True
+
     def create(self, path: t.Union[str, Path]) -> File:
         """
         Create a new file
@@ -135,12 +179,19 @@ class FileManager(WithLogger):
         self._recent = self._files[path]
         return self._recent
 
+    def create_directory(self, path: t.Union[str, Path]) -> Path:
+        """Create a new directory."""
+        path = self.working_dir / path
+        path.mkdir(parents=True, exist_ok=False)
+        return path
+
     def grep(
         self,
         word: str,
         pattern: t.Optional[t.Union[str, Path]] = None,
         recursive: bool = True,
         case_insensitive: bool = True,
+        exclude: t.Optional[t.List[t.Union[str, Path]]] = None,
     ) -> t.Dict[str, t.List[t.Tuple[int, str]]]:
         """
         Search for a word in files matching the given pattern.
@@ -149,6 +200,7 @@ class FileManager(WithLogger):
         :param pattern: The file, directory, or glob pattern to search in (if not provided, searches in the current working directory)
         :param recursive: If True, search recursively in subdirectories
         :param case_insensitive: If True, perform case-insensitive search (default is True)
+        :param exclude: List of directory paths to exclude from the search
         :return: A dictionary with file paths as keys and lists of (line number, line content) tuples as values
 
         Examples of patterns:
@@ -163,8 +215,11 @@ class FileManager(WithLogger):
         else:
             pattern = Path(pattern)
 
+        exclude_paths = [self.working_dir / Path(ex) for ex in (exclude or [])]
+
         results: t.Dict[str, t.List[t.Tuple[int, str]]] = {}
         paths_to_search: t.List[Path] = []
+        truncate_length = 1024
 
         if pattern.is_file():
             paths_to_search = [pattern]
@@ -180,6 +235,10 @@ class FileManager(WithLogger):
                 paths_to_search = list(self.working_dir.glob(str(pattern)))
 
         for file_path in paths_to_search:
+            # Skip if file is in an excluded directory
+            if any(ex in file_path.parents for ex in exclude_paths):
+                continue
+
             if file_path.is_file() and not file_path.name.startswith("."):
                 try:
                     with file_path.open("r", encoding="utf-8") as f:
@@ -192,7 +251,16 @@ class FileManager(WithLogger):
                                     )
                                     if rel_path not in results:
                                         results[rel_path] = []
-                                    results[rel_path].append((i, line.strip()))
+                                    results[rel_path].append(
+                                        (
+                                            i,
+                                            (
+                                                line.strip()[:truncate_length] + "..."
+                                                if len(line.strip()) > truncate_length
+                                                else line.strip()
+                                            ),
+                                        )
+                                    )
                             else:
                                 if word in line:
                                     rel_path = str(
@@ -200,25 +268,26 @@ class FileManager(WithLogger):
                                     )
                                     if rel_path not in results:
                                         results[rel_path] = []
-                                    results[rel_path].append((i, line.strip()))
+                                    results[rel_path].append(
+                                        (
+                                            i,
+                                            (
+                                                line.strip()[:truncate_length] + "..."
+                                                if len(line.strip()) > truncate_length
+                                                else line.strip()
+                                            ),
+                                        )
+                                    )
                 except UnicodeDecodeError:
                     # Skip binary files
                     pass
 
         if not results:
-            print(f'No matches found for "{word}" in {pattern}')
+            self.logger.debug(f'No matches found for "{word}" in {pattern}')
             return {}
 
         num_matches: int = sum(len(matches) for matches in results.values())
-        num_files: int = len(results)
-
-        if num_files > 100:
-            print(
-                f'More than {num_files} files matched for "{word}" in {pattern}. Please narrow your search.'
-            )
-            return {}
-
-        self.logger.info(f'Found {num_matches} matches for "{word}" in {pattern}')
+        self.logger.debug(f'Found {num_matches} matches for "{word}" in {pattern}')
         return results
 
     def find(
@@ -246,9 +315,11 @@ class FileManager(WithLogger):
         :return: List of file paths matching the search pattern
         """
 
-        include_paths = [Path(dir).resolve() for dir in (include or [self.working_dir])]
-        exclude_paths = [Path(dir).resolve() for dir in (exclude or [])] + [
-            Path(".git").resolve()
+        include_paths = [
+            self.resolve_dir(dir) for dir in (include or [self.working_dir])
+        ]
+        exclude_paths = [self.resolve_dir(dir) for dir in (exclude or [])] + [
+            self.resolve_dir(".git")
         ]
 
         if case_sensitive:
@@ -269,8 +340,9 @@ class FileManager(WithLogger):
                     ):
                         continue
 
-                    if regex.match(item.name):
-                        matches.append(str(item.relative_to(self.working_dir)))
+                    relative_path = str(item.relative_to(self.working_dir))
+                    if regex.match(relative_path):
+                        matches.append(relative_path)
 
                     if item.is_dir():
                         search_recursive(item, current_depth + 1)
@@ -280,7 +352,7 @@ class FileManager(WithLogger):
         for directory in include_paths:
             search_recursive(directory, 0)
 
-        return matches
+        return sorted(matches)
 
     def _tree(
         self,
@@ -289,7 +361,7 @@ class FileManager(WithLogger):
         depth: int,
         exclude: t.List[Path],
     ) -> str:
-        """Auxialiary method for creating working directory tree recursively."""
+        """Auxiliary method for creating working directory tree recursively."""
         if (depth != -1 and level > depth) or directory in exclude:
             return ""
 
@@ -331,7 +403,10 @@ class FileManager(WithLogger):
     def ls(self) -> t.List[t.Tuple[str, str]]:
         """List contents of the current directory with their types."""
         return [
-            (str(path), "dir" if path.is_dir() else "file")
+            (
+                str(path.relative_to(self.working_dir)),
+                "dir" if path.is_dir() else "file",
+            )
             for path in self.working_dir.iterdir()
         ]
 

@@ -1,132 +1,349 @@
-import { CancelablePromise, listAllConnections, createConnection, GetConnectedAccountResponse, GetConnectedAccountData, CreateConnectionData, CreateConnectionResponse, ListAllConnectionsData, ListAllConnectionsResponse, getConnectedAccount } from "../client";
-import { Composio } from "../";
+import { z } from "zod";
+import {
+  ConnectedAccountResponseDTO,
+  ConnectionParams,
+  DeleteRowAPIDTO,
+  GetConnectionsResponseDto,
+} from "../client";
+import { default as apiClient } from "../client/client";
+import {
+  ZInitiateConnectionDataReq,
+  ZListConnectionsData,
+  ZReinitiateConnectionPayloadDto,
+  ZSaveUserAccessDataParam,
+  ZSingleConnectionParams,
+} from "../types/connectedAccount";
+import { ZAuthMode } from "../types/integration";
+import { CEG } from "../utils/error";
+import { TELEMETRY_LOGGER } from "../utils/telemetry";
+import { TELEMETRY_EVENTS } from "../utils/telemetry/events";
+import { AxiosBackendClient } from "./backendClient";
 
+type ConnectedAccountsListData = z.infer<typeof ZListConnectionsData> & {
+  /** @deprecated use appUniqueKeys field instead */
+  appNames?: string;
+};
+
+type InitiateConnectionDataReq = z.infer<typeof ZInitiateConnectionDataReq>;
+
+type SingleConnectionParam = z.infer<typeof ZSingleConnectionParams>;
+
+type SaveUserAccessDataParam = z.infer<typeof ZSaveUserAccessDataParam>;
+
+type ReinitiateConnectionPayload = z.infer<
+  typeof ZReinitiateConnectionPayloadDto
+>;
+
+export type ConnectedAccountListResponse = GetConnectionsResponseDto;
+export type SingleConnectedAccountResponse = ConnectedAccountResponseDTO;
+export type SingleDeleteResponse = DeleteRowAPIDTO;
+
+export type ConnectionChangeResponse = {
+  status: "success";
+  connectedAccountId: string;
+};
+export type ConnectionItem = ConnectionParams;
+
+/**
+ * Class representing connected accounts in the system.
+ */
 export class ConnectedAccounts {
-    constructor(private readonly client: Composio) {
-    }
+  private backendClient: AxiosBackendClient;
+  private fileName: string = "js/src/sdk/models/connectedAccounts.ts";
 
-    /**
-     * Retrieves a list of all connected accounts in the Composio platform.
-     * 
-     * It supports pagination and filtering based on various parameters such as app ID, integration ID, and connected account ID. The response includes an array of connection objects, each containing details like the connector ID, connection parameters, status, creation/update timestamps, and associated app information.
-     * 
-     * @param {ListAllConnectionsData} data The data for the request.
-     * @returns {CancelablePromise<ListAllConnectionsResponse>} A promise that resolves to the list of all connected accounts.
-     * @throws {ApiError} If the request fails.
-     */
-    list(data: ListAllConnectionsData = {}): CancelablePromise<ListAllConnectionsResponse> {
-        return listAllConnections(data, this.client.config);
-    }
+  /**
+   * Initializes a new instance of the ConnectedAccounts class.
+   * @param {AxiosBackendClient} backendClient - The backend client instance.
+   */
+  constructor(backendClient: AxiosBackendClient) {
+    this.backendClient = backendClient;
+  }
 
-    /**
-     * Connects an account to the Composio platform.
-     * 
-     * This method allows you to connect an external app account with Composio. It requires the integration ID in the request body and returns the connection status, connection ID, and a redirect URL (if applicable) for completing the connection flow.
-     * 
-     * @param {CreateConnectionData} data The data for the request.
-     * @returns {CancelablePromise<CreateConnectionResponse>} A promise that resolves to the connection status and details.
-     * @throws {ApiError} If the request fails.
-     */
-    create(data: CreateConnectionData = {}): CancelablePromise<CreateConnectionResponse> {
-        return createConnection(data, this.client.config);
+  /**
+   * List all connected accounts
+   * @param {ConnectedAccountsListData} data - The data for the connected accounts list
+   * @returns {Promise<ConnectedAccountListResponse>} - A promise that resolves to a list of connected accounts
+   */
+  async list(
+    data: ConnectedAccountsListData
+  ): Promise<ConnectedAccountListResponse> {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "list",
+      file: this.fileName,
+      params: { data },
+    });
+    try {
+      const { appNames, appUniqueKeys } = ZListConnectionsData.parse(data);
+      const finalAppNames = appNames || appUniqueKeys?.join(",");
+      const res = await apiClient.connections.listConnections({
+        query: {
+          ...data,
+          appNames: finalAppNames,
+        },
+      });
+      return res.data!;
+    } catch (error) {
+      throw CEG.handleAllError(error);
     }
+  }
 
-    /**
-     * Retrieves details of a specific account connected to the Composio platform by providing its connected account ID.
-     * 
-     * The response includes the integration ID, connection parameters (such as scope, base URL, client ID, token type, access token, etc.), connection ID, status, and creation/update timestamps.
-     * 
-     * @param {GetConnectedAccountData} data The data for the request.
-     * @returns {CancelablePromise<GetConnectedAccountResponse>} A promise that resolves to the details of the connected account.
-     * @throws {ApiError} If the request fails.
-     */
-    get(data: GetConnectedAccountData): CancelablePromise<GetConnectedAccountResponse> {
-        return getConnectedAccount(data, this.client.config);
+  /**
+   * Get a single connected account
+   * @param {SingleConnectionParam} data - The data for the single connection
+   * @returns {Promise<SingleConnectedAccountResponse>} - A promise that resolves to a single connected account
+   */
+  async get(
+    data: SingleConnectionParam
+  ): Promise<SingleConnectedAccountResponse> {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "get",
+      file: this.fileName,
+      params: { data },
+    });
+    try {
+      ZSingleConnectionParams.parse(data);
+      const res = await apiClient.connections.getConnection({
+        path: data,
+        throwOnError: true,
+      });
+      return res.data;
+    } catch (error) {
+      throw CEG.handleAllError(error);
     }
+  }
 
-    /**
-     * Initiates a new connected account on the Composio platform.
-     * 
-     * This method allows you to start the process of connecting an external app account with Composio. It requires the integration ID and optionally the entity ID, additional parameters, and a redirect URL.
-     * 
-     * @param {CreateConnectionData["requestBody"]} data The data for the request.
-     * @returns {CancelablePromise<ConnectionRequest>} A promise that resolves to the connection request model.
-     * @throws {ApiError} If the request fails.
-     */
-    async initiate(
-        data: CreateConnectionData["requestBody"]
-    ): Promise<ConnectionRequest> {
-        const response = await createConnection({requestBody: data}, this.client.config);
-        return new ConnectionRequest(response.connectionStatus!, response.connectedAccountId!, response.redirectUrl, this.client);
+  /**
+   * Delete a single connected account
+   * @param {SingleConnectionParam} data - The data for the single connection
+   * @returns {Promise<SingleDeleteResponse>} - A promise that resolves when the connected account is deleted
+   */
+  async delete(data: SingleConnectionParam): Promise<SingleDeleteResponse> {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "delete",
+      file: this.fileName,
+      params: { data },
+    });
+    try {
+      ZSingleConnectionParams.parse(data);
+      const res = await apiClient.connections.deleteConnection({
+        path: data,
+        throwOnError: true,
+      });
+      return res.data!;
+    } catch (error) {
+      throw CEG.handleAllError(error);
     }
+  }
+
+  /**
+   * Disable a single connected account
+   * @param {SingleConnectionParam} data - The data for the single connection
+   * @returns {Promise<ConnectionChangeResponse>} - A promise that resolves when the connected account is disabled
+   */
+  async disable(
+    data: SingleConnectionParam
+  ): Promise<ConnectionChangeResponse> {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "disable",
+      file: this.fileName,
+      params: { data },
+    });
+    try {
+      ZSingleConnectionParams.parse(data);
+      const res = await apiClient.connections.disableConnection({
+        path: data,
+        throwOnError: true,
+      });
+      return {
+        status: "success",
+        connectedAccountId: data.connectedAccountId,
+      };
+    } catch (error) {
+      throw CEG.handleAllError(error);
+    }
+  }
+
+  /**
+   * Enable a single connected account
+   * @param {SingleConnectionParam} data - The data for the single connection
+   * @returns {Promise<ConnectionChangeResponse>} - A promise that resolves when the connected account is enabled
+   */
+  async enable(data: SingleConnectionParam): Promise<ConnectionChangeResponse> {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "enable",
+      file: this.fileName,
+      params: { data },
+    });
+    try {
+      ZSingleConnectionParams.parse(data);
+      await apiClient.connections.enableConnection({
+        path: {
+          connectedAccountId: data.connectedAccountId,
+        },
+        throwOnError: true,
+      });
+      return {
+        status: "success",
+        connectedAccountId: data.connectedAccountId,
+      };
+    } catch (error) {
+      throw CEG.handleAllError(error);
+    }
+  }
+
+  /**
+   * Initiate a connection
+   * @param {InitiateConnectionDataReq} payload - The payload for the connection initiation
+   * @returns {Promise<ConnectionRequest>} - A promise that resolves to a connection request
+   */
+  async initiate(
+    payload: InitiateConnectionDataReq
+  ): Promise<ConnectionRequest> {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "initiate",
+      file: this.fileName,
+      params: { payload },
+    });
+    try {
+      const connection = await apiClient.connectionsV2.initiateConnectionV2({
+        body: {
+          app: {
+            uniqueKey: payload.appName!,
+            integrationId: payload.integrationId,
+          },
+          config: {
+            name: payload.appName!,
+            useComposioAuth: !!payload.authMode && !!payload.authConfig,
+            authScheme: payload.authMode as z.infer<typeof ZAuthMode>,
+            integrationSecrets: payload.authConfig,
+          },
+          connection: {
+            entityId: payload.entityId,
+            initiateData:
+              (payload.connectionParams as Record<string, unknown>) || {},
+            extra: {
+              redirectURL: payload.redirectUri,
+              labels: payload.labels || [],
+            },
+          },
+        },
+      });
+
+      const connectionResponse = connection?.data?.connectionResponse;
+
+      return new ConnectionRequest({
+        connectionStatus: connectionResponse?.connectionStatus!,
+        connectedAccountId: connectionResponse?.connectedAccountId!,
+        redirectUri: connectionResponse?.redirectUrl!,
+      });
+    } catch (error) {
+      throw CEG.handleAllError(error);
+    }
+  }
+
+  /**
+   * Reinitiate a connection
+   * @param {ReinitiateConnectionPayload} data - The payload for the connection reinitialization
+   * @returns {Promise<ConnectionRequest>} - A promise that resolves to a connection request
+   */
+  async reinitiateConnection(data: ReinitiateConnectionPayload) {
+    TELEMETRY_LOGGER.manualTelemetry(TELEMETRY_EVENTS.SDK_METHOD_INVOKED, {
+      method: "reinitiateConnection",
+      file: this.fileName,
+      params: { data },
+    });
+    try {
+      ZReinitiateConnectionPayloadDto.parse(data);
+      const connection = await apiClient.connections.reinitiateConnection({
+        path: {
+          connectedAccountId: data.connectedAccountId,
+        },
+        body: {
+          data: data.data,
+          redirectUri: data.redirectUri,
+        },
+      });
+
+      const res = connection.data;
+
+      return new ConnectionRequest({
+        connectionStatus: res?.connectionStatus!,
+        connectedAccountId: res?.connectedAccountId!,
+        redirectUri: res?.redirectUrl!,
+      });
+    } catch (error) {
+      throw CEG.handleAllError(error);
+    }
+  }
 }
 
 export class ConnectionRequest {
+  connectionStatus: string;
+  connectedAccountId: string;
+  redirectUrl: string | null;
+
+  constructor({
+    connectionStatus,
+    connectedAccountId,
+    redirectUri,
+  }: {
     connectionStatus: string;
     connectedAccountId: string;
-    redirectUrl: string | null;
+    redirectUri: string | null;
+  }) {
+    this.connectionStatus = connectionStatus;
+    this.connectedAccountId = connectedAccountId;
+    this.redirectUrl = redirectUri;
+  }
 
-    /**
-     * Connection request model.
-     * @param {string} connectionStatus The status of the connection.
-     * @param {string} connectedAccountId The unique identifier of the connected account.
-     * @param {string} [redirectUrl] The redirect URL for completing the connection flow.
-     */
-    constructor(connectionStatus: string, connectedAccountId: string, redirectUrl: string | null = null, private readonly client: Composio) {
-        this.connectionStatus = connectionStatus;
-        this.connectedAccountId = connectedAccountId;
-        this.redirectUrl = redirectUrl;
-    }
-
-    /**
-     * Save user access data.
-     * @param {Composio} client The Composio client instance.
-     * @param {Object} data The data to save.
-     * @param {Object} data.fieldInputs The field inputs to save.
-     * @param {string} [data.redirectUrl] The redirect URL for completing the connection flow.
-     * @param {string} [data.entityId] The entity ID associated with the user.
-     * @returns {Promise<Object>} The response from the server.
-     */
-    async saveUserAccessData(data: {
-        fieldInputs: Record<string, string>;
-        redirectUrl?: string;
-        entityId?: string;
-    }) {
-        const connectedAccount = await this.client.connectedAccounts.get({
-            connectedAccountId: this.connectedAccountId,
+  async saveUserAccessData(data: SaveUserAccessDataParam) {
+    try {
+      ZSaveUserAccessDataParam.parse(data);
+      const { data: connectedAccount } =
+        await apiClient.connections.getConnection({
+          path: { connectedAccountId: this.connectedAccountId },
         });
-        return createConnection({
-            requestBody: {
-                integrationId: connectedAccount.integrationId,
-                data: data.fieldInputs,
-                redirectUri: data.redirectUrl,
-                userUuid: data.entityId,
-            }
-        }, this.client.config);
+      if (!connectedAccount) throw new Error("Connected account not found");
+      return await apiClient.connections.initiateConnection({
+        body: {
+          integrationId: connectedAccount.integrationId,
+          //@ts-ignore
+          data: data.fieldInputs,
+          redirectUri: data.redirectUrl,
+          userUuid: data.entityId,
+          entityId: data.entityId,
+        },
+      });
+    } catch (error) {
+      throw CEG.handleAllError(error);
     }
+  }
 
-    /**
-     * Wait until the connection becomes active.
-     * @param {Composio} client The Composio client instance.
-     * @param {number} [timeout=60] The timeout period in seconds.
-     * @returns {Promise<ConnectedAccountModel>} The connected account model.
-     * @throws {ComposioClientError} If the connection does not become active within the timeout period.
-     */
-    async waitUntilActive(timeout = 60) {
-        const startTime = Date.now();
-        while (Date.now() - startTime < timeout * 1000) {
-            const connection = await this.client.connectedAccounts.get({
-                connectedAccountId: this.connectedAccountId,
-            });
-            if (connection.status === 'ACTIVE') {
-                return connection;
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000));
+  /**
+   * Wait until the connection becomes active
+   * @param {number} timeout - The timeout for the connection to become active
+   * @returns {Promise<Connection>} - A promise that resolves to the connection
+   */
+  async waitUntilActive(timeout = 60) {
+    try {
+      const startTime = Date.now();
+      while (Date.now() - startTime < timeout * 1000) {
+        const connection = await apiClient.connections
+          .getConnection({
+            path: { connectedAccountId: this.connectedAccountId },
+          })
+          .then((res) => res.data);
+        if (!connection) throw new Error("Connected account not found");
+        if (connection.status === "ACTIVE") {
+          return connection;
         }
-
-        throw new Error(
-            'Connection did not become active within the timeout period.'
-        );
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      throw new Error(
+        "Connection did not become active within the timeout period."
+      );
+    } catch (error) {
+      throw CEG.handleAllError(error);
     }
+  }
 }
-
